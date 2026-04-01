@@ -1,0 +1,274 @@
+---
+title: "String methods"
+description: "Registering, reading, and storing string and boolean configuration properties"
+---
+
+String and boolean properties are the most common configuration types. They are managed through the `String` and `Flaggable` interfaces, both part of the `Plant` interface.
+
+All property names are normalized to lowercase internally. Passing `"Workers"` and `"workers"` refer to the same property.
+
+---
+
+## String type
+
+### NewString()
+
+```go
+func (p Plant) NewString(name, value, usage string) Plant
+```
+
+Registers a new string property and wires it to the flag parser. Must be called before `Parse()`, `Load()`, or any `ParseFile()` / `LoadFile()` call.
+
+Returns the same `Plant` so calls can be chained.
+
+<ParamField path="name" type="string" required>
+  The flag name. Exposed as `-name=value` on the command line and as the uppercase env var `NAME`.
+</ParamField>
+
+<ParamField path="value" type="string" required>
+  Default value used when the flag is not provided and no matching env var or config file entry is found.
+</ParamField>
+
+<ParamField path="usage" type="string" required>
+  Human-readable description displayed by `-h` / `-help` and `UsageString()`.
+</ParamField>
+
+<ResponseField name="Plant" type="Plant">
+  The same Plant instance, enabling method chaining.
+</ResponseField>
+
+```go
+figs := figtree.New()
+figs.NewString("endpoint", "http://localhost:8080", "upstream API endpoint")
+figs.WithValidator("endpoint", figtree.AssureStringHasPrefix("http"))
+if err := figs.Parse(); err != nil {
+    log.Fatal(err)
+}
+endpoint := *figs.String("endpoint")
+```
+
+---
+
+### String()
+
+```go
+func (p Plant) String(name string) *string
+```
+
+Returns a pointer to the current string value for the named property. Returns `nil` if the property has not been registered. When `Options.Pollinate` is `true`, the current environment variable is checked on every call and the stored value is updated if it differs.
+
+<ParamField path="name" type="string" required>
+  The registered property name (case-insensitive).
+</ParamField>
+
+<ResponseField name="*string" type="*string">
+  Pointer to the current value. Dereference with `*` before use. Returns `nil` for unregistered properties and a pointer to an empty string on internal error.
+</ResponseField>
+
+```go
+endpoint := *figs.String("endpoint")
+fmt.Println("endpoint:", endpoint)
+```
+
+<Warning>
+Always check for `nil` before dereferencing if there is any possibility the property was not registered.
+</Warning>
+
+---
+
+### StoreString()
+
+```go
+func (p Plant) StoreString(name, value string) Plant
+```
+
+Replaces the current value of a registered string property. If `Tracking` is enabled, a `Mutation` is emitted on the `Mutations()` channel. The property must already be registered via `NewString()`.
+
+<ParamField path="name" type="string" required>
+  The registered property name.
+</ParamField>
+
+<ParamField path="value" type="string" required>
+  The new value to store.
+</ParamField>
+
+<ResponseField name="Plant" type="Plant">
+  The same Plant instance, enabling method chaining.
+</ResponseField>
+
+```go
+figs.StoreString("endpoint", "https://api.example.com")
+fmt.Println(*figs.String("endpoint")) // "https://api.example.com"
+```
+
+---
+
+## Bool type
+
+### NewBool()
+
+```go
+func (p Plant) NewBool(name string, value bool, usage string) Plant
+```
+
+Registers a new boolean property. The CLI flag accepts standard Go boolean strings: `true`, `false`, `1`, `0`, `t`, `f`, `T`, `F`, `TRUE`, `FALSE`.
+
+<ParamField path="name" type="string" required>
+  The flag name. Exposed as `-name=true` or `-name` (presence implies `true`).
+</ParamField>
+
+<ParamField path="value" type="bool" required>
+  Default value.
+</ParamField>
+
+<ParamField path="usage" type="string" required>
+  Human-readable description.
+</ParamField>
+
+<ResponseField name="Plant" type="Plant">
+  The same Plant instance, enabling method chaining.
+</ResponseField>
+
+```go
+figs := figtree.New()
+figs.NewBool("debug", false, "enable debug logging")
+if err := figs.Parse(); err != nil {
+    log.Fatal(err)
+}
+if *figs.Bool("debug") {
+    log.SetLevel(log.DebugLevel)
+}
+```
+
+---
+
+### Bool()
+
+```go
+func (p Plant) Bool(name string) *bool
+```
+
+Returns a pointer to the current boolean value for the named property.
+
+<ParamField path="name" type="string" required>
+  The registered property name (case-insensitive).
+</ParamField>
+
+<ResponseField name="*bool" type="*bool">
+  Pointer to the current value. Returns `nil` for unregistered properties.
+</ResponseField>
+
+```go
+debug := *figs.Bool("debug")
+```
+
+---
+
+### StoreBool()
+
+```go
+func (p Plant) StoreBool(name string, value bool) Plant
+```
+
+Replaces the current value of a registered boolean property at runtime. Emits a `Mutation` when tracking is enabled.
+
+<ParamField path="name" type="string" required>
+  The registered property name.
+</ParamField>
+
+<ParamField path="value" type="bool" required>
+  The new value.
+</ParamField>
+
+<ResponseField name="Plant" type="Plant">
+  The same Plant instance, enabling method chaining.
+</ResponseField>
+
+```go
+figs.StoreBool("debug", true)
+```
+
+---
+
+## Generic setter
+
+### Store()
+
+```go
+func (p Plant) Store(mutagenesis Mutagenesis, key string, value interface{}) Plant
+```
+
+The underlying setter used by all type-specific `StoreXxx()` methods. Use the typed variants (`StoreString`, `StoreBool`, etc.) in most cases. Use `Store()` directly when the mutagenesis type is determined at runtime or when writing generic middleware.
+
+<ParamField path="mutagenesis" type="Mutagenesis" required>
+  The type constant for the property. Must match the type used when the property was registered. Available constants: `tString`, `tBool`, `tInt`, `tInt64`, `tFloat64`, `tDuration`, `tUnitDuration`, `tList`, `tMap`.
+</ParamField>
+
+<ParamField path="key" type="string" required>
+  The registered property name.
+</ParamField>
+
+<ParamField path="value" type="interface{}" required>
+  The new value. Must be type-compatible with the registered mutagenesis or `Store()` will record a type mismatch error on the property.
+</ParamField>
+
+<ResponseField name="Plant" type="Plant">
+  The same Plant instance.
+</ResponseField>
+
+```go
+// Equivalent to figs.StoreString("endpoint", "https://api.example.com")
+figs.Store(figtree.MutagenesisOf(""), "endpoint", "https://api.example.com")
+```
+
+---
+
+## Type introspection
+
+### FigFlesh()
+
+```go
+func (p Plant) FigFlesh(name string) Flesh
+```
+
+Returns the `Flesh` interface for a registered property. `Flesh` provides type-check predicates (`IsString()`, `IsBool()`, `IsInt()`, etc.) and typed coercions (`ToString()`, `ToBool()`, `ToInt()`, etc.) on the raw stored value.
+
+<ParamField path="name" type="string" required>
+  The registered property name.
+</ParamField>
+
+<ResponseField name="Flesh" type="Flesh">
+  A `Flesh` value wrapping the underlying stored value. Use the `IsXxx()` methods to determine the type before calling a `ToXxx()` conversion.
+</ResponseField>
+
+```go
+flesh := figs.FigFlesh("endpoint")
+if flesh.IsString() {
+    fmt.Println("value as string:", flesh.ToString())
+}
+```
+
+The `Flesh` interface exposes the following methods:
+
+| Method | Description |
+|---|---|
+| `Is(mutagenesis Mutagenesis) bool` | Checks whether the stored type matches the given `Mutagenesis` constant. |
+| `AsIs() interface{}` | Returns the raw value without conversion. |
+| `IsString() bool` | `true` when the stored type is `String`. |
+| `IsBool() bool` | `true` when the stored type is `Bool`. |
+| `IsInt() bool` | `true` when the stored type is `Int`. |
+| `IsInt64() bool` | `true` when the stored type is `Int64`. |
+| `IsFloat64() bool` | `true` when the stored type is `Float64`. |
+| `IsDuration() bool` | `true` when the stored type is `Duration`. |
+| `IsUnitDuration() bool` | `true` when the stored type is `UnitDuration`. |
+| `IsList() bool` | `true` when the stored type is `List`. |
+| `IsMap() bool` | `true` when the stored type is `Map`. |
+| `ToString() string` | Returns the value coerced to `string`. |
+| `ToBool() bool` | Returns the value coerced to `bool`. |
+| `ToInt() int` | Returns the value coerced to `int`. |
+| `ToInt64() int64` | Returns the value coerced to `int64`. |
+| `ToFloat64() float64` | Returns the value coerced to `float64`. |
+| `ToDuration() time.Duration` | Returns the value coerced to `time.Duration`. |
+| `ToUnitDuration() time.Duration` | Returns the value coerced to `time.Duration` (unit-scaled). |
+| `ToList() []string` | Returns the value coerced to `[]string`. |
+| `ToMap() map[string]string` | Returns the value coerced to `map[string]string`. |

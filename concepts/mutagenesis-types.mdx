@@ -1,0 +1,301 @@
+---
+title: "Mutagenesis types"
+description: "The nine supported configuration value types in Figtree"
+---
+
+Every value registered in a Figtree tree has a **Mutagenesis** — a string constant that identifies its Go type. Figtree uses this type tag to correctly parse CLI flags, environment variables, and config file entries, and to route values through the right typed getters and setters.
+
+The `Mutagenesis` type is a plain `string`:
+
+```go
+type Mutagenesis string
+```
+
+All nine constants are exported in the `Mutageneses` slice:
+
+```go
+var Mutageneses = []Mutagenesis{
+    "String", "Bool", "Int", "Int64", "Float64",
+    "Duration", "UnitDuration", "List", "Map",
+}
+```
+
+## All nine types
+
+| Type | Constant value | Go type | Default CLI example |
+|------|---------------|---------|---------------------|
+| String | `"String"` | `string` | `-name=value` |
+| Bool | `"Bool"` | `bool` | `-debug=true` |
+| Int | `"Int"` | `int` | `-workers=4` |
+| Int64 | `"Int64"` | `int64` | `-maxRetries=5` |
+| Float64 | `"Float64"` | `float64` | `-threshold=0.75` |
+| Duration | `"Duration"` | `time.Duration` | `-timeout=30s` |
+| UnitDuration | `"UnitDuration"` | `time.Duration` | `-interval=5` |
+| List | `"List"` | `[]string` | `-servers=ONE,TWO,THREE` |
+| Map | `"Map"` | `map[string]string` | `-metadata=key=val,key2=val2` |
+
+---
+
+## String
+
+Stores a plain Go `string`.
+
+```go
+import figtree "github.com/andreimerlescu/figtree/v2"
+
+figs := figtree.New()
+figs.NewString("endpoint", "http://localhost:8080", "API endpoint URL")
+_ = figs.Parse()
+
+endpoint := *figs.String("endpoint")
+fmt.Println(endpoint) // http://localhost:8080
+```
+
+Environment variable override: `ENDPOINT=https://api.example.com`
+
+---
+
+## Bool
+
+Stores a Go `bool`. Accepts `true`, `false`, `1`, `0` on the command line or in environment variables.
+
+```go
+figs.NewBool("debug", false, "enable debug logging")
+_ = figs.Parse()
+
+if *figs.Bool("debug") {
+    log.SetLevel(log.DebugLevel)
+}
+```
+
+Environment variable override: `DEBUG=true`
+
+---
+
+## Int
+
+Stores a Go `int`.
+
+```go
+figs.NewInt("workers", 10, "number of worker goroutines")
+_ = figs.Parse()
+
+n := *figs.Int("workers")
+for i := 0; i < n; i++ {
+    go startWorker()
+}
+```
+
+Environment variable override: `WORKERS=20`
+
+---
+
+## Int64
+
+Stores a Go `int64`. Use this instead of `Int` when values may exceed the 32-bit range or when interoperating with APIs that return `int64`.
+
+```go
+figs.NewInt64("maxRetries", 5, "maximum number of retry attempts")
+_ = figs.Parse()
+
+retries := *figs.Int64("maxRetries")
+```
+
+Environment variable override: `MAXRETRIES=10`
+
+---
+
+## Float64
+
+Stores a Go `float64`.
+
+```go
+figs.NewFloat64("threshold", 0.75, "decision threshold between 0.0 and 1.0")
+figs.WithValidator("threshold", figtree.AssureFloat64InRange(0.0, 1.0))
+_ = figs.Parse()
+
+t := *figs.Float64("threshold")
+```
+
+Environment variable override: `THRESHOLD=0.9`
+
+---
+
+## Duration
+
+Stores a `time.Duration` parsed directly from a standard Go duration string such as `30s`, `5m`, or `1h30m`.
+
+```go
+figs.NewDuration("timeout", 30*time.Second, "HTTP request timeout")
+_ = figs.Parse()
+
+client := &http.Client{Timeout: *figs.Duration("timeout")}
+```
+
+CLI: `-timeout=2m30s`  
+Environment variable override: `TIMEOUT=2m30s`
+
+<Note>
+`Duration` accepts Go's standard duration string format (`time.ParseDuration`). For integer-multiplied durations (e.g. `-interval=5` meaning five minutes), use `UnitDuration` instead.
+</Note>
+
+---
+
+## UnitDuration
+
+Stores a `time.Duration` where the CLI and environment input is a plain integer and a **units** multiplier is baked in at registration time. This is useful when you want users to specify "5 minutes" simply as `-interval=5` instead of `-interval=5m`.
+
+```go
+figs.NewUnitDuration("interval", 1, time.Minute, "polling interval in minutes")
+_ = figs.Parse()
+
+d := *figs.UnitDuration("interval") // 1 * time.Minute = 1m0s
+```
+
+CLI: `-interval=5` → stores `5 * time.Minute`  
+Environment variable override: `INTERVAL=5`
+
+The signature is:
+
+```go
+NewUnitDuration(name string, value, units time.Duration, usage string) Plant
+```
+
+- `value` — the default integer (treated as a count of `units`)
+- `units` — the multiplier, e.g. `time.Second`, `time.Minute`, `time.Hour`
+
+<Tip>
+You can retrieve the same fig with different unit interpretations at read time. For example, the same "seconds" fig can be read as a minute-based duration by calling `*figs.UnitDuration("seconds", time.Minute)` in code, though the stored value is still the original unit-multiplied duration.
+</Tip>
+
+---
+
+## List
+
+Stores a `[]string`. On the command line or in an environment variable, values are separated by `ListSeparator` (default `,`).
+
+```go
+figs.NewList("servers", []string{"server1", "server2"}, "comma-separated server addresses")
+figs.WithValidator("servers", figtree.AssureListNotEmpty)
+_ = figs.Parse()
+
+for _, s := range *figs.List("servers") {
+    connect(s)
+}
+```
+
+CLI: `-servers=server3,server4,server5`  
+Environment variable override: `SERVERS=server3,server4,server5`
+
+### Changing the separator
+
+```go
+figtree.ListSeparator = ";" // change before calling any New/Parse
+```
+
+---
+
+## Map
+
+Stores a `map[string]string`. Entries are separated by `MapSeparator` (default `,`) and each entry's key and value are separated by `MapKeySeparator` (default `=`).
+
+```go
+figs.NewMap("metadata", map[string]string{"env": "prod"}, "key=value metadata pairs")
+figs.WithValidator("metadata", figtree.AssureMapHasKey("env"))
+_ = figs.Parse()
+
+meta := *figs.Map("metadata")
+fmt.Println(meta["env"])
+```
+
+CLI: `-metadata=env=staging,version=2.1`  
+Environment variable override: `METADATA=env=staging,version=2.1`
+
+### Changing the separators
+
+```go
+figtree.MapSeparator    = ";"  // separates pairs
+figtree.MapKeySeparator = ":"  // separates key from value
+```
+
+---
+
+## Type introspection
+
+At runtime you can determine a fig's Mutagenesis without knowing its name in advance:
+
+```go
+flesh := figs.FigFlesh("interval")
+if flesh.IsUnitDuration() {
+    fmt.Println("interval =", flesh.ToUnitDuration())
+}
+
+// Or by constant comparison
+m := figs.MutagenesisOfFig("interval")
+fmt.Println(m) // "UnitDuration"
+```
+
+---
+
+## Config file format by type
+
+In YAML, JSON, and INI, value types map naturally to their registered Mutagenesis:
+
+<Tabs>
+  <Tab title="YAML">
+    ```yaml
+    workers: 15
+    threshold: 0.9
+    debug: true
+    timeout: 45s
+    interval: 5
+    servers: "server1,server2,server3"
+    metadata: "env=prod,version=2.0"
+    endpoint: "https://api.example.com"
+    maxRetries: 3
+    ```
+  </Tab>
+  <Tab title="JSON">
+    ```json
+    {
+      "workers": 15,
+      "threshold": 0.9,
+      "debug": true,
+      "timeout": "45s",
+      "interval": 5,
+      "servers": "server1,server2,server3",
+      "metadata": "env=prod,version=2.0",
+      "endpoint": "https://api.example.com",
+      "maxRetries": 3
+    }
+    ```
+  </Tab>
+  <Tab title="INI">
+    ```ini
+    workers=15
+    threshold=0.9
+    debug=true
+    timeout=45s
+    interval=5
+    servers=server1,server2,server3
+    metadata=env=prod,version=2.0
+    endpoint=https://api.example.com
+    maxRetries=3
+    ```
+  </Tab>
+</Tabs>
+
+<CardGroup cols={2}>
+  <Card title="The Plant interface" href="/concepts/plant-interface">
+    How all typed interfaces compose into Plant
+  </Card>
+  <Card title="Configuration sources" href="/concepts/config-sources">
+    Precedence rules for flags, env vars, and files
+  </Card>
+  <Card title="API: string methods" href="/api/string-methods">
+    NewString, String, StoreString reference
+  </Card>
+  <Card title="API: numeric methods" href="/api/numeric-methods">
+    Int, Int64, Float64 method reference
+  </Card>
+</CardGroup>

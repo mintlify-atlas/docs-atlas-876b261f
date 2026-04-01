@@ -1,0 +1,281 @@
+---
+title: "Mutations reference"
+description: "Complete reference for mutation tracking, the Mutation struct, and Curse/Recall"
+---
+
+Mutation tracking lets your application observe every value change on the tree in real time. When `Options.Tracking` is `true`, each successful `Store*` call sends a `Mutation` value to a channel that you read in a goroutine.
+
+---
+
+## `Mutation` struct
+
+```go
+type Mutation struct {
+    Property    string
+    Mutagenesis string
+    Way         string
+    Old         interface{}
+    New         interface{}
+    When        time.Time
+    Error       error
+}
+```
+
+<ResponseField name="Property" type="string">
+  The lowercase name of the property that changed.
+</ResponseField>
+
+<ResponseField name="Mutagenesis" type="string">
+  The lowercase type name of the property — for example `"string"`, `"int"`, `"bool"`, `"float64"`, `"duration"`, `"list"`, or `"map"`.
+</ResponseField>
+
+<ResponseField name="Way" type="string">
+  The method that triggered the mutation, formatted as `"Store"` + the type name — for example `"StoreString"`, `"StoreInt"`, `"StoreBool"`.
+</ResponseField>
+
+<ResponseField name="Old" type="interface{}">
+  The previous value of the property before the change. May be `nil` if no prior value was recorded.
+</ResponseField>
+
+<ResponseField name="New" type="interface{}">
+  The new value after the change.
+</ResponseField>
+
+<ResponseField name="When" type="time.Time">
+  The timestamp recorded immediately after the new value was written, using `time.Now()`.
+</ResponseField>
+
+<ResponseField name="Error" type="error">
+  Any error produced by the `Store*` operation or by `CallbackAfterChange`. `nil` on a clean mutation.
+</ResponseField>
+
+---
+
+## `Mutagenesis` type
+
+```go
+type Mutagenesis string
+```
+
+`Mutagenesis` represents the type of a registered property as a string constant. The internal constants map to the following Go types:
+
+| Constant | Go types |
+|----------|----------|
+| `"String"` | `string`, `*string` |
+| `"Bool"` | `bool`, `*bool` |
+| `"Int"` | `int`, `*int` |
+| `"Int64"` | `int64`, `*int64` |
+| `"Float64"` | `float64`, `*float64` |
+| `"Duration"` | `time.Duration`, `*time.Duration` |
+| `"UnitDuration"` | `time.Duration` with units multiplier |
+| `"List"` | `ListFlag`, `*ListFlag`, `[]string`, `*[]string` |
+| `"Map"` | `MapFlag`, `*MapFlag`, `map[string]string`, `*map[string]string` |
+
+---
+
+## Methods
+
+### `Mutations`
+
+```go
+func (tree *figTree) Mutations() <-chan Mutation
+```
+
+Returns the read-only mutations channel. Each successful `Store*` call that actually changes the value sends one `Mutation` to this channel. The channel is created with a buffer of `Options.Harvest` when the tree is constructed.
+
+<Note>
+  `Mutations()` returns `nil` if `Options.Tracking` was `false` when the tree was created. Always check `ok` when receiving from the channel, or guard with a `select` and a cancellation context.
+</Note>
+
+---
+
+### `MutagenesisOfFig`
+
+```go
+func (tree *figTree) MutagenesisOfFig(name string) Mutagenesis
+```
+
+Looks up a registered property by name and returns its `Mutagenesis`. Returns an empty string if the property is not found.
+
+<ParamField path="name" type="string" required>
+  The name of the property to inspect.
+</ParamField>
+
+```go
+m := figs.MutagenesisOfFig("port")
+fmt.Println(m) // "Int"
+```
+
+---
+
+### `MutagenesisOf`
+
+```go
+func (tree *figTree) MutagenesisOf(what interface{}) Mutagenesis
+```
+
+Accepts any Go value and returns the `Mutagenesis` constant that corresponds to its runtime type. Returns an empty string for unrecognised types.
+
+<ParamField path="what" type="interface{}" required>
+  Any Go value whose type you want to identify.
+</ParamField>
+
+```go
+fmt.Println(figs.MutagenesisOf("hello"))    // "String"
+fmt.Println(figs.MutagenesisOf(42))         // "Int"
+fmt.Println(figs.MutagenesisOf(3.14))       // "Float64"
+fmt.Println(figs.MutagenesisOf([]string{})) // "List"
+```
+
+There is also a package-level function with the same logic:
+
+```go
+func MutagenesisOf(what interface{}) Mutagenesis
+```
+
+---
+
+### `Curse`
+
+```go
+func (tree *figTree) Curse()
+```
+
+Locks the tree against further changes, stops tracking, and **closes** the mutations channel. After `Curse`:
+
+- All `Store*` methods are silently rejected (the `angel` atomic flag is set to `true`).
+- `tracking` is set to `false`.
+- The mutations channel is closed — any goroutine blocking on `<-figs.Mutations()` will unblock with the zero value and `ok == false`.
+
+Use `Curse` to finalise configuration at the end of an initialisation phase.
+
+---
+
+### `Recall`
+
+```go
+func (tree *figTree) Recall()
+```
+
+Unlocks the tree, resumes tracking, and **reopens** the mutations channel. After `Recall`:
+
+- The `angel` atomic flag is set to `false`, allowing `Store*` methods to succeed again.
+- `tracking` is set to `true`.
+- A new channel is created with the same `harvest` buffer size as the original.
+
+<Warning>
+  Any goroutine that was reading from the old channel (before `Curse`) will have received a channel-close signal. You must restart your mutation-listener goroutine after calling `Recall` to read from the new channel.
+</Warning>
+
+---
+
+## Options that affect mutations
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `Tracking` | `bool` | Must be `true` to enable the mutations channel. When `false`, `Mutations()` returns `nil` and no `Mutation` values are sent. |
+| `Harvest` | `int` | Buffer size of the mutations channel. `0` creates an unbuffered channel — senders block until the receiver reads. Use a positive value to absorb bursts. |
+| `Pollinate` | `bool` | When `true`, getter methods (`String()`, `Int()`, etc.) check the environment for an updated value on every call. If the value has changed, a mutation is sent to the channel. |
+
+---
+
+## Goroutine-based mutation listener
+
+The idiomatic way to consume mutations is in a separate goroutine with context cancellation:
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "log"
+    "time"
+
+    "github.com/andreimerlescu/figtree/v2"
+)
+
+func main() {
+    figs := figtree.With(figtree.Options{
+        Tracking:  true,
+        Harvest:   100,
+        Pollinate: true,
+    })
+
+    figs.NewString("host", "localhost", "server hostname").
+        NewInt("port", 8080, "listen port").
+        NewBool("debug", false, "debug mode")
+
+    if err := figs.Load(); err != nil {
+        log.Fatal(err)
+    }
+
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    // Start the mutation listener.
+    go func() {
+        for {
+            select {
+            case <-ctx.Done():
+                return
+            case mutation, ok := <-figs.Mutations():
+                if !ok {
+                    // Channel was closed by Curse().
+                    return
+                }
+                if mutation.Error != nil {
+                    log.Printf("mutation error on %s: %v", mutation.Property, mutation.Error)
+                    continue
+                }
+                fmt.Printf(
+                    "[%s] %s changed via %s: %v -> %v\n",
+                    mutation.When.Format(time.RFC3339),
+                    mutation.Property,
+                    mutation.Way,
+                    mutation.Old,
+                    mutation.New,
+                )
+            }
+        }
+    }()
+
+    // Simulate value changes.
+    figs.StoreString("host", "10.0.0.1")
+    figs.StoreInt("port", 9090)
+    figs.StoreBool("debug", true)
+
+    // Lock the tree when configuration is settled.
+    figs.Curse()
+}
+```
+
+---
+
+## Unbuffered vs. buffered channel
+
+| `Harvest` | Behaviour |
+|-----------|-----------|
+| `0` (default) | Unbuffered. `Store*` blocks until the listener reads. Suitable when mutations are infrequent. |
+| `> 0` | Buffered. `Store*` returns immediately as long as buffer space is available. Use when mutations can arrive in bursts faster than the listener can process them. |
+
+<Tip>
+  Set `Harvest` to at least the maximum number of properties you expect to change during a single `Load` or `Reload` call, so that the load path is never blocked by a full channel.
+</Tip>
+
+---
+
+<CardGroup cols={2}>
+  <Card title="Callbacks reference" icon="bell" href="/api/callbacks-reference">
+    Run code on value changes without a goroutine using `CallbackAfterChange`.
+  </Card>
+  <Card title="Rules reference" icon="lock" href="/api/rules-reference">
+    `RulePreventChange` silently blocks mutations from reaching the channel.
+  </Card>
+  <Card title="Mutagenesis types" icon="dna" href="/concepts/mutagenesis-types">
+    Conceptual overview of all supported property types.
+  </Card>
+  <Card title="Mutation tracking guide" icon="arrows-rotate" href="/guides/mutation-tracking">
+    Patterns for consuming the mutations channel in production.
+  </Card>
+</CardGroup>

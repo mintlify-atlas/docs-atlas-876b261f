@@ -1,97 +1,94 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
+title: "Figtree"
+description: "A Go library for managing CLI application configuration via flags, environment variables, and config files — with mutation tracking, validators, and callbacks."
 ---
 
-## Setting up
+Figtree is a configuration management library for Go CLI applications. Import it as `figs`, configure your app's runtime properties once, and let Figtree handle flag parsing, environment variable resolution, file loading (YAML, JSON, INI), type-safe access, validation, and live mutation tracking.
 
-Get your documentation site up and running in minutes.
-
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
-
-## Make it yours
-
-Design a docs site that looks great and empowers your users.
-
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Install Figtree and define your first configuration properties in under 5 minutes.
   </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
+  <Card title="Core Concepts" icon="book" href="/concepts/plant-interface">
+    Understand the Plant interface, Mutagenesis types, and how config sources are resolved.
   </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
+  <Card title="Guides" icon="map" href="/guides/validators">
+    Learn to validate properties, react to changes with callbacks, and track mutations.
   </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
+  <Card title="API Reference" icon="code" href="/api/constructors">
+    Full reference for every constructor, method, validator, rule, and callback.
   </Card>
-</Columns>
+</CardGroup>
 
-## Create beautiful pages
+## What Figtree does
 
-Everything you need to create world-class documentation.
+Figtree wraps Go's `flag` package and adds a layered configuration system. Every property you register — a string, integer, duration, list, or map — can be populated from:
 
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
-  </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
-  </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
-  </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
-  </Card>
-</Columns>
+1. A config file (YAML, JSON, or INI)
+2. Environment variables (uppercase key name)
+3. CLI flags (`-name=value`)
 
-## Need inspiration?
+Sources are applied in that order of precedence. Figtree resolves them all automatically when you call `Parse()` or `Load()`.
 
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+<Steps>
+  <Step title="Install">
+    Add Figtree to your Go module with a single command.
+
+    ```bash
+    go get -u github.com/andreimerlescu/figtree/v2
+    ```
+  </Step>
+  <Step title="Define properties">
+    Register every configuration property your app needs before calling `Parse()`.
+
+    ```go
+    figs := figtree.Grow()
+    figs.NewString("endpoint", "http://localhost:8080", "API endpoint URL")
+    figs.NewInt("workers", 4, "Number of concurrent workers")
+    figs.NewBool("debug", false, "Enable debug logging")
+    ```
+  </Step>
+  <Step title="Validate and parse">
+    Attach validators, then parse flags and environment variables in one call.
+
+    ```go
+    figs.WithValidator("endpoint", figtree.AssureStringHasPrefix("http"))
+    figs.WithValidator("workers", figtree.AssureIntInRange(1, 32))
+    if err := figs.Parse(); err != nil {
+        log.Fatal(err)
+    }
+    ```
+  </Step>
+  <Step title="Read values">
+    Access any property as a typed pointer, anywhere in your program.
+
+    ```go
+    endpoint := *figs.String("endpoint")
+    workers  := *figs.Int("workers")
+    debug    := *figs.Bool("debug")
+    ```
+  </Step>
+</Steps>
+
+## Key features
+
+<CardGroup cols={2}>
+  <Card title="Multi-source config" icon="layer-group">
+    Load from YAML, JSON, or INI files, environment variables, or CLI flags — all in one call.
+  </Card>
+  <Card title="Mutation tracking" icon="bell">
+    Receive a `Mutation` on a channel every time a property value changes at runtime.
+  </Card>
+  <Card title="36+ built-in validators" icon="shield-check">
+    Validate strings, numbers, durations, lists, and maps without writing custom logic.
+  </Card>
+  <Card title="Lifecycle callbacks" icon="arrows-rotate">
+    Run functions before or after a property is read, changed, or verified.
+  </Card>
+  <Card title="Tree and property rules" icon="lock">
+    Prevent changes, disable flags, or skip environment variables — per property or globally.
+  </Card>
+  <Card title="Environment polling" icon="satellite-dish">
+    Enable `Pollinate` to re-read env vars on every getter call and track live changes.
+  </Card>
+</CardGroup>

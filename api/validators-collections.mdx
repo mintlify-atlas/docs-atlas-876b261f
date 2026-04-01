@@ -1,0 +1,299 @@
+---
+title: "Collection validators"
+description: "Built-in validators for list and map configuration properties"
+---
+
+Figtree provides validators for its two collection types: `[]string` lists and `map[string]string` maps. Each validator type-checks its input against `ListFlag`/`[]string` or `MapFlag`/`map[string]string` before evaluating the constraint.
+
+```go
+type FigValidatorFunc func(interface{}) error
+```
+
+---
+
+## List validators
+
+### `AssureListNotEmpty`
+
+```go
+var AssureListNotEmpty = func(value interface{}) error
+```
+
+Ensures a list property has at least one element. Returns an error if the list is empty or if the value is not a valid list type.
+
+**Type:** `func(interface{}) error` (pass directly — not a factory)
+
+```go
+figs.NewList("tags", []string{}, "resource tags").
+    WithValidator("tags", figtree.AssureListNotEmpty)
+```
+
+---
+
+### `AssureListMinLength`
+
+```go
+var AssureListMinLength = func(min int) FigValidatorFunc
+```
+
+Ensures a list has at least `min` elements. Returns an error if the list is shorter than `min` or not a valid list type.
+
+<ParamField path="min" type="int" required>
+  Minimum number of elements required.
+</ParamField>
+
+```go
+figs.NewList("hosts", []string{}, "cluster hosts").
+    WithValidator("hosts", figtree.AssureListMinLength(2))
+```
+
+---
+
+### `AssureListLength`
+
+```go
+var AssureListLength = func(length int) FigValidatorFunc
+```
+
+Ensures a list has **exactly** `length` elements. Returns an error if the count differs or the value is not a valid list type.
+
+<ParamField path="length" type="int" required>
+  The exact number of elements required.
+</ParamField>
+
+```go
+figs.NewList("pair", []string{}, "key-value pair").
+    WithValidator("pair", figtree.AssureListLength(2))
+```
+
+---
+
+### `AssureListContains`
+
+```go
+var AssureListContains = func(inside string) FigValidatorFunc
+```
+
+Ensures a list contains the string `inside`. The comparison is exact (case-sensitive).
+
+<ParamField path="inside" type="string" required>
+  The value that must be present in the list.
+</ParamField>
+
+```go
+figs.NewList("roles", []string{}, "user roles").
+    WithValidator("roles", figtree.AssureListContains("admin"))
+```
+
+---
+
+### `AssureListNotContains`
+
+```go
+var AssureListNotContains = func(not string) FigValidatorFunc
+```
+
+Ensures a list does **not** contain the string `not`. Returns an error if `not` is found in the list.
+
+<ParamField path="not" type="string" required>
+  The value that must not appear in the list.
+</ParamField>
+
+```go
+figs.NewList("permissions", []string{}, "granted permissions").
+    WithValidator("permissions", figtree.AssureListNotContains("superuser"))
+```
+
+---
+
+### `AssureListContainsKey`
+
+```go
+var AssureListContainsKey = func(key string) FigValidatorFunc
+```
+
+Ensures a list contains the exact string `key`. Accepts `*ListFlag`, `*[]string`, or `[]string`. Returns an error if `key` is not found.
+
+<ParamField path="key" type="string" required>
+  The key string that must exist in the list.
+</ParamField>
+
+```go
+figs.NewList("features", []string{}, "enabled features").
+    WithValidator("features", figtree.AssureListContainsKey("oauth"))
+```
+
+<Note>
+  `AssureListContainsKey` and `AssureListContains` perform the same check. `AssureListContainsKey` is the preferred form when the list represents a set of identifiers or flags.
+</Note>
+
+---
+
+## Map validators
+
+### `AssureMapNotEmpty`
+
+```go
+var AssureMapNotEmpty = func(value interface{}) error
+```
+
+Ensures a map property has at least one entry. Returns an error if the map is empty or the value is not a valid map type.
+
+**Type:** `func(interface{}) error` (pass directly — not a factory)
+
+```go
+figs.NewMap("headers", map[string]string{}, "default http headers").
+    WithValidator("headers", figtree.AssureMapNotEmpty)
+```
+
+---
+
+### `AssureMapLength`
+
+```go
+var AssureMapLength = func(length int) FigValidatorFunc
+```
+
+Ensures a map has **exactly** `length` entries. Returns an error if the count differs or the value is not a valid map type. Accepts `*MapFlag`, `*map[string]string`, or `map[string]string`.
+
+<ParamField path="length" type="int" required>
+  The exact number of entries required.
+</ParamField>
+
+```go
+figs.NewMap("credentials", map[string]string{}, "auth credentials").
+    WithValidator("credentials", figtree.AssureMapLength(2))
+```
+
+---
+
+### `AssureMapNotLength`
+
+```go
+var AssureMapNotLength = func(length int) FigValidatorFunc
+```
+
+Ensures a map does **not** have exactly `length` entries. Returns an error if the count matches.
+
+<ParamField path="length" type="int" required>
+  The exact count that is forbidden.
+</ParamField>
+
+```go
+figs.NewMap("settings", map[string]string{}, "feature settings").
+    WithValidator("settings", figtree.AssureMapNotLength(0))
+```
+
+---
+
+### `AssureMapHasKey`
+
+```go
+var AssureMapHasKey = func(key string) FigValidatorFunc
+```
+
+Ensures a map contains `key`. Returns an error if the key is absent or the value is not a valid map type.
+
+<ParamField path="key" type="string" required>
+  The key that must exist in the map.
+</ParamField>
+
+```go
+figs.NewMap("config", map[string]string{}, "app configuration").
+    WithValidator("config", figtree.AssureMapHasKey("database_url"))
+```
+
+---
+
+### `AssureMapHasNoKey`
+
+```go
+var AssureMapHasNoKey = func(key string) FigValidatorFunc
+```
+
+Ensures a map does **not** contain `key`. Returns an error if the key is present.
+
+<ParamField path="key" type="string" required>
+  The key that must not exist in the map.
+</ParamField>
+
+```go
+figs.NewMap("env", map[string]string{}, "environment overrides").
+    WithValidator("env", figtree.AssureMapHasNoKey("SECRET_KEY"))
+```
+
+---
+
+### `AssureMapHasKeys`
+
+```go
+var AssureMapHasKeys = func(keys []string) FigValidatorFunc
+```
+
+Ensures a map contains **all** of the given keys. Returns an error listing any missing keys.
+
+<ParamField path="keys" type="[]string" required>
+  All keys that must be present in the map.
+</ParamField>
+
+```go
+figs.NewMap("db", map[string]string{}, "database config").
+    WithValidator("db", figtree.AssureMapHasKeys([]string{"host", "port", "name", "user"}))
+```
+
+---
+
+### `AssureMapValueMatches`
+
+```go
+var AssureMapValueMatches = func(key, match string) FigValidatorFunc
+```
+
+Ensures that the map contains `key` and that its value equals `match` exactly. Returns an error if the key is missing or the value does not match.
+
+<ParamField path="key" type="string" required>
+  The key to look up.
+</ParamField>
+
+<ParamField path="match" type="string" required>
+  The exact value the key must hold.
+</ParamField>
+
+```go
+figs.NewMap("flags", map[string]string{}, "feature flags").
+    WithValidator("flags", figtree.AssureMapValueMatches("environment", "production"))
+```
+
+---
+
+## Chaining collection validators
+
+You can combine validators on the same property. All validators are evaluated in registration order.
+
+```go
+figs.NewMap("tls", map[string]string{}, "TLS configuration").
+    WithValidator("tls", figtree.AssureMapNotEmpty).
+    WithValidator("tls", figtree.AssureMapHasKeys([]string{"cert", "key"})).
+    WithValidator("tls", figtree.AssureMapHasNoKey("password"))
+```
+
+<Warning>
+  Collection validators reject any value that cannot be cast to the expected type (`ListFlag`, `[]string`, `MapFlag`, or `map[string]string`). Register list properties with `NewList` and map properties with `NewMap` to ensure compatible types.
+</Warning>
+
+---
+
+<CardGroup cols={2}>
+  <Card title="String validators" icon="text" href="/api/validators-string">
+    Validators for string and bool properties.
+  </Card>
+  <Card title="Numeric validators" icon="calculator" href="/api/validators-numeric">
+    Validators for int, int64, float64, and duration properties.
+  </Card>
+  <Card title="Collection methods" icon="table" href="/api/collection-methods">
+    Register and read list and map properties.
+  </Card>
+  <Card title="Validators guide" icon="shield-check" href="/guides/validators">
+    How to write custom validators and compose built-ins.
+  </Card>
+</CardGroup>

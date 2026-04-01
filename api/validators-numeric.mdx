@@ -1,0 +1,412 @@
+---
+title: "Numeric validators"
+description: "Built-in validators for integer, float64, and duration configuration properties"
+---
+
+Figtree provides validators for every numeric type it supports: `int`, `int64`, `float64`, and `time.Duration`. Each section lists the factory functions (which return a `FigValidatorFunc`) and the direct validators (which match `func(interface{}) error` and are passed without calling them).
+
+```go
+type FigValidatorFunc func(interface{}) error
+```
+
+---
+
+## Int validators
+
+### `AssureIntPositive`
+
+```go
+var AssureIntPositive = func(value interface{}) error
+```
+
+Ensures an `int` property is positive (≥ 0). Returns an error if the value is negative or not an `int`.
+
+**Type:** `func(interface{}) error` (pass directly — not a factory)
+
+```go
+figs.NewInt("port", 0, "listen port").
+    WithValidator("port", figtree.AssureIntPositive)
+```
+
+---
+
+### `AssureIntNegative`
+
+```go
+var AssureIntNegative = func(value interface{}) error
+```
+
+Ensures an `int` property is negative (≤ 0). Returns an error if the value is positive or not an `int`.
+
+**Type:** `func(interface{}) error` (pass directly — not a factory)
+
+```go
+figs.NewInt("offset", 0, "negative byte offset").
+    WithValidator("offset", figtree.AssureIntNegative)
+```
+
+---
+
+### `AssureIntGreaterThan`
+
+```go
+var AssureIntGreaterThan = func(above int) FigValidatorFunc
+```
+
+Ensures an `int` property is greater than or equal to `above`.
+
+<ParamField path="above" type="int" required>
+  The inclusive lower bound.
+</ParamField>
+
+```go
+figs.NewInt("workers", 1, "worker pool size").
+    WithValidator("workers", figtree.AssureIntGreaterThan(1))
+```
+
+---
+
+### `AssureIntLessThan`
+
+```go
+var AssureIntLessThan = func(below int) FigValidatorFunc
+```
+
+Ensures an `int` property is less than or equal to `below`.
+
+<ParamField path="below" type="int" required>
+  The inclusive upper bound.
+</ParamField>
+
+```go
+figs.NewInt("retries", 3, "max retry count").
+    WithValidator("retries", figtree.AssureIntLessThan(10))
+```
+
+---
+
+### `AssureIntInRange`
+
+```go
+var AssureIntInRange = func(min, max int) FigValidatorFunc
+```
+
+Ensures an `int` property is within the inclusive range `[min, max]`.
+
+<ParamField path="min" type="int" required>
+  Minimum allowed value (inclusive).
+</ParamField>
+
+<ParamField path="max" type="int" required>
+  Maximum allowed value (inclusive).
+</ParamField>
+
+```go
+figs.NewInt("port", 8080, "http listen port").
+    WithValidator("port", figtree.AssureIntInRange(1024, 65535))
+```
+
+---
+
+## Int64 validators
+
+### `AssureInt64Positive`
+
+```go
+var AssureInt64Positive = func(value interface{}) error
+```
+
+Ensures an `int64` property is strictly positive (> 0). Returns an error if the value is zero or negative, or not an `int64`.
+
+**Type:** `func(interface{}) error` (pass directly — not a factory)
+
+```go
+figs.NewInt64("bytes", 0, "file size limit in bytes").
+    WithValidator("bytes", figtree.AssureInt64Positive)
+```
+
+---
+
+### `AssureInt64GreaterThan`
+
+```go
+var AssureInt64GreaterThan = func(above int64) FigValidatorFunc
+```
+
+Ensures an `int64` property is greater than or equal to `above`.
+
+<ParamField path="above" type="int64" required>
+  The inclusive lower bound.
+</ParamField>
+
+```go
+figs.NewInt64("size", 0, "minimum file size").
+    WithValidator("size", figtree.AssureInt64GreaterThan(int64(1024)))
+```
+
+---
+
+### `AssureInt64LessThan`
+
+```go
+var AssureInt64LessThan = func(below int64) FigValidatorFunc
+```
+
+Ensures an `int64` property is less than or equal to `below`.
+
+<ParamField path="below" type="int64" required>
+  The inclusive upper bound.
+</ParamField>
+
+```go
+figs.NewInt64("limit", 0, "upload limit bytes").
+    WithValidator("limit", figtree.AssureInt64LessThan(int64(1_073_741_824))) // 1 GiB
+```
+
+---
+
+### `AssureInt64InRange`
+
+```go
+var AssureInt64InRange = func(min, max int64) FigValidatorFunc
+```
+
+Ensures an `int64` property is within the inclusive range `[min, max]`.
+
+<ParamField path="min" type="int64" required>
+  Minimum allowed value (inclusive).
+</ParamField>
+
+<ParamField path="max" type="int64" required>
+  Maximum allowed value (inclusive).
+</ParamField>
+
+```go
+figs.NewInt64("expiry", 0, "token expiry unix timestamp").
+    WithValidator("expiry", figtree.AssureInt64InRange(int64(0), int64(9_999_999_999)))
+```
+
+---
+
+## Float64 validators
+
+### `AssureFloat64Positive`
+
+```go
+var AssureFloat64Positive = func(value interface{}) error
+```
+
+Ensures a `float64` property is strictly positive (> 0). Returns an error if the value is zero, negative, or not a `float64`.
+
+**Type:** `func(interface{}) error` (pass directly — not a factory)
+
+```go
+figs.NewFloat64("rate", 0.0, "request rate per second").
+    WithValidator("rate", figtree.AssureFloat64Positive)
+```
+
+---
+
+### `AssureFloat64NotNaN`
+
+```go
+var AssureFloat64NotNaN = func(value interface{}) error
+```
+
+Ensures a `float64` property is not `NaN`. Returns an error if `math.IsNaN` returns true or the value is not a `float64`.
+
+**Type:** `func(interface{}) error` (pass directly — not a factory)
+
+```go
+figs.NewFloat64("score", 0.0, "model confidence score").
+    WithValidator("score", figtree.AssureFloat64NotNaN)
+```
+
+---
+
+### `AssureFloat64GreaterThan`
+
+```go
+var AssureFloat64GreaterThan = func(above float64) FigValidatorFunc
+```
+
+Ensures a `float64` property is greater than or equal to `above`.
+
+<ParamField path="above" type="float64" required>
+  The inclusive lower bound.
+</ParamField>
+
+```go
+figs.NewFloat64("threshold", 0.5, "detection threshold").
+    WithValidator("threshold", figtree.AssureFloat64GreaterThan(0.0))
+```
+
+---
+
+### `AssureFloat64LessThan`
+
+```go
+var AssureFloat64LessThan = func(below float64) FigValidatorFunc
+```
+
+Ensures a `float64` property is less than or equal to `below`.
+
+<ParamField path="below" type="float64" required>
+  The inclusive upper bound.
+</ParamField>
+
+```go
+figs.NewFloat64("ratio", 0.5, "compression ratio").
+    WithValidator("ratio", figtree.AssureFloat64LessThan(1.0))
+```
+
+---
+
+### `AssureFloat64InRange`
+
+```go
+var AssureFloat64InRange = func(min, max float64) FigValidatorFunc
+```
+
+Ensures a `float64` property is within the inclusive range `[min, max]`.
+
+<ParamField path="min" type="float64" required>
+  Minimum allowed value (inclusive).
+</ParamField>
+
+<ParamField path="max" type="float64" required>
+  Maximum allowed value (inclusive).
+</ParamField>
+
+```go
+figs.NewFloat64("probability", 0.5, "event probability").
+    WithValidator("probability", figtree.AssureFloat64InRange(0.0, 1.0))
+```
+
+---
+
+## Duration validators
+
+### `AssureDurationPositive`
+
+```go
+var AssureDurationPositive = func(value interface{}) error
+```
+
+Ensures a `time.Duration` property is strictly positive (> 0). Returns an error if the duration is zero or negative, or not a `time.Duration`.
+
+**Type:** `func(interface{}) error` (pass directly — not a factory)
+
+```go
+figs.NewDuration("timeout", 0, "request timeout").
+    WithValidator("timeout", figtree.AssureDurationPositive)
+```
+
+---
+
+### `AssureDurationGreaterThan`
+
+```go
+var AssureDurationGreaterThan = func(above time.Duration) FigValidatorFunc
+```
+
+Ensures a `time.Duration` property is greater than or equal to `above`.
+
+<ParamField path="above" type="time.Duration" required>
+  The inclusive lower bound.
+</ParamField>
+
+```go
+figs.NewDuration("interval", 0, "polling interval").
+    WithValidator("interval", figtree.AssureDurationGreaterThan(100*time.Millisecond))
+```
+
+---
+
+### `AssureDurationLessThan`
+
+```go
+var AssureDurationLessThan = func(below time.Duration) FigValidatorFunc
+```
+
+Ensures a `time.Duration` property is less than or equal to `below`.
+
+<ParamField path="below" type="time.Duration" required>
+  The inclusive upper bound.
+</ParamField>
+
+```go
+figs.NewDuration("deadline", 0, "operation deadline").
+    WithValidator("deadline", figtree.AssureDurationLessThan(30*time.Second))
+```
+
+---
+
+### `AssureDurationMin`
+
+```go
+var AssureDurationMin = func(min time.Duration) FigValidatorFunc
+```
+
+Ensures a `time.Duration` property is at least `min`. Returns an error if the duration is shorter than `min` or not a `time.Duration`.
+
+<ParamField path="min" type="time.Duration" required>
+  The minimum acceptable duration (inclusive).
+</ParamField>
+
+```go
+figs.NewDuration("cache-ttl", 0, "cache time-to-live").
+    WithValidator("cache-ttl", figtree.AssureDurationMin(time.Second))
+```
+
+---
+
+### `AssureDurationMax`
+
+```go
+var AssureDurationMax = func(max time.Duration) FigValidatorFunc
+```
+
+Ensures a `time.Duration` property does not exceed `max`. Returns an error if the duration is longer than `max` or not a `time.Duration`.
+
+<ParamField path="max" type="time.Duration" required>
+  The maximum acceptable duration (inclusive).
+</ParamField>
+
+```go
+figs.NewDuration("session", 0, "session lifetime").
+    WithValidator("session", figtree.AssureDurationMax(24*time.Hour))
+```
+
+---
+
+## Combining range validators
+
+Pair `AssureDurationMin` and `AssureDurationMax` (or their `GreaterThan`/`LessThan` counterparts) to express a bounded range:
+
+```go
+figs.NewDuration("backoff", 0, "retry backoff").
+    WithValidator("backoff", figtree.AssureDurationMin(50*time.Millisecond)).
+    WithValidator("backoff", figtree.AssureDurationMax(10*time.Second))
+```
+
+<Warning>
+  Duration validators type-check the value strictly. Passing an `int` or `int64` raw value to a duration property will fail validation with an `ErrInvalidType` error. Register properties with `NewDuration` or `NewUnitDuration` and store with `StoreDuration` or `StoreUnitDuration`.
+</Warning>
+
+---
+
+<CardGroup cols={2}>
+  <Card title="String validators" icon="text" href="/api/validators-string">
+    Validators for string and bool properties.
+  </Card>
+  <Card title="Collection validators" icon="list" href="/api/validators-collections">
+    Validators for list and map properties.
+  </Card>
+  <Card title="Duration methods" icon="clock" href="/api/duration-methods">
+    Register and read duration and unit-duration properties.
+  </Card>
+  <Card title="Validators guide" icon="shield-check" href="/guides/validators">
+    How to write custom validators and compose built-ins.
+  </Card>
+</CardGroup>

@@ -1,0 +1,230 @@
+---
+title: "Callbacks"
+description: "Running functions before or after configuration properties are read, changed, or verified"
+---
+
+Callbacks let you attach side-effect functions to configuration properties. A callback runs automatically at a specific point in the property lifecycle — before or after a read, a change, or a verification pass.
+
+## The `CallbackFunc` type
+
+Every callback must match the `CallbackFunc` signature:
+
+```go
+type CallbackFunc func(interface{}) error
+```
+
+Returning a non-nil error from a callback propagates the error back to the caller (e.g. `Parse()` or a getter).
+
+## The 6 `CallbackWhen` constants
+
+| Constant | Trigger |
+|----------|---------|
+| `CallbackBeforeRead` | Just before a getter (e.g. `figs.String("name")`) reads the value |
+| `CallbackAfterRead` | Just after a getter returns |
+| `CallbackBeforeChange` | Just before a `Store*` call updates the value |
+| `CallbackAfterChange` | Just after a `Store*` call updates the value |
+| `CallbackBeforeVerify` | At the start of `Parse()`, `ParseFile()`, `Load()`, or `LoadFile()` |
+| `CallbackAfterVerify` | At the end of `Parse()`, `ParseFile()`, `Load()`, or `LoadFile()` |
+
+## Registering a callback
+
+```go
+figs.WithCallback(name string, when CallbackWhen, fn CallbackFunc) Plant
+```
+
+You can attach multiple callbacks to the same property. Every matching callback runs when the trigger fires:
+
+```go
+import (
+    "fmt"
+    "log"
+
+    figtree "github.com/andreimerlescu/figtree/v2"
+)
+
+const kDomain = "domain"
+
+figs := figtree.With(figtree.Options{Tracking: true, Harvest: 1776, Pollinate: true})
+figs.NewString(kDomain, "", "Domain name")
+figs.WithValidator(kDomain, figtree.AssureStringLengthGreaterThan(3))
+figs.WithValidator(kDomain, figtree.AssureStringHasPrefix("https://"))
+
+// Runs once during Parse()/Load()
+figs.WithCallback(kDomain, figtree.CallbackAfterVerify, func(value interface{}) error {
+    var s string
+    switch v := value.(type) {
+    case *string:
+        s = *v
+    case string:
+        s = v
+    default:
+        return fmt.Errorf("unexpected type %T", value)
+    }
+    return checkAvailability(s)
+})
+
+// Runs on every figs.String(kDomain) call
+figs.WithCallback(kDomain, figtree.CallbackAfterRead, func(value interface{}) error {
+    var s string
+    switch v := value.(type) {
+    case *string:
+        s = *v
+    case string:
+        s = v
+    }
+    log.Printf("domain read: %s", s)
+    return nil
+})
+
+// Runs on StoreString(kDomain, ...) calls
+figs.WithCallback(kDomain, figtree.CallbackAfterChange, func(value interface{}) error {
+    var s string
+    switch v := value.(type) {
+    case *string:
+        s = *v
+    case string:
+        s = v
+    }
+    log.Printf("domain changed to: %s", s)
+    return nil
+})
+
+err := figs.Parse() // triggers CallbackBeforeVerify, validators, then CallbackAfterVerify
+if err != nil {
+    log.Fatal(err)
+}
+
+domain := *figs.String(kDomain)           // triggers CallbackBeforeRead + CallbackAfterRead
+figs.StoreString(kDomain, "https://new.example.com") // triggers CallbackBeforeChange + CallbackAfterChange
+newDomain := *figs.String(kDomain)        // triggers CallbackBeforeRead + CallbackAfterRead
+log.Printf("domain=%s newDomain=%s", domain, newDomain)
+```
+
+## Safely casting the `interface{}` argument
+
+The value passed to your `CallbackFunc` may be a pointer or a direct value. Always use a type switch:
+
+```go
+func myCallback(value interface{}) error {
+    switch v := value.(type) {
+    case *string:
+        // dereference the pointer
+        process(*v)
+    case string:
+        process(v)
+    case *int:
+        process(*v)
+    case int:
+        process(v)
+    case *float64:
+        process(*v)
+    case float64:
+        process(v)
+    case *bool:
+        process(*v)
+    case bool:
+        process(v)
+    default:
+        return fmt.Errorf("unexpected type %T", value)
+    }
+    return nil
+}
+```
+
+## Callback timing per trigger
+
+<AccordionGroup>
+  <Accordion title="CallbackBeforeVerify / CallbackAfterVerify">
+    These fire during the verification phase:
+
+    ```go
+    // CallbackBeforeVerify fires at the start of Parse()/Load()
+    figs.WithCallback("debug", figtree.CallbackBeforeVerify, func(v interface{}) error {
+        log.Println("about to verify configuration")
+        return nil
+    })
+
+    // CallbackAfterVerify fires after all validators pass
+    figs.WithCallback("debug", figtree.CallbackAfterVerify, func(v interface{}) error {
+        log.Println("configuration verified successfully")
+        return nil
+    })
+
+    err := figs.Parse()
+    ```
+  </Accordion>
+
+  <Accordion title="CallbackBeforeRead / CallbackAfterRead">
+    These fire on every getter call. Because getters are typically called frequently, keep these callbacks lightweight.
+
+    ```go
+    figs.WithCallback("endpoint", figtree.CallbackAfterRead, func(value interface{}) error {
+        var s string
+        switch v := value.(type) {
+        case *string:
+            s = *v
+        case string:
+            s = v
+        }
+        log.Printf("endpoint accessed: %s", s)
+        return nil
+    })
+
+    // This call triggers the AfterRead callback
+    ep := *figs.String("endpoint")
+    ```
+  </Accordion>
+
+  <Accordion title="CallbackBeforeChange / CallbackAfterChange">
+    These fire on `Store*` method calls.
+
+    ```go
+    figs.WithCallback("max_retries", figtree.CallbackAfterChange, func(value interface{}) error {
+        switch v := value.(type) {
+        case *int64:
+            log.Printf("max_retries changed to %d", *v)
+        case int64:
+            log.Printf("max_retries changed to %d", v)
+        }
+        return nil
+    })
+
+    figs.StoreInt64("max_retries", 10) // triggers CallbackBeforeChange + CallbackAfterChange
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Disabling callbacks for a property
+
+Use `RuleNoCallbacks` to prevent any callback from running on a specific property, regardless of what has been registered:
+
+```go
+figs.WithCallback("name", figtree.CallbackAfterRead, myCallback)
+figs.WithRule("name", figtree.RuleNoCallbacks)
+// myCallback will never be invoked for "name"
+```
+
+<Warning>
+  Attaching a `CallbackAfterRead` callback to a frequently accessed property can noticeably slow your application. Use `AfterRead` callbacks sparingly — they execute on every getter call. For high-volume change notifications, prefer [mutation tracking](/guides/mutation-tracking) instead.
+</Warning>
+
+<Tip>
+  For validation logic that must run at startup, prefer `CallbackAfterVerify` over validators when you need side effects (e.g. connecting to a service, logging, or modifying external state).
+</Tip>
+
+---
+
+<CardGroup cols={2}>
+  <Card title="Validators" href="/guides/validators">
+    Enforce constraints on values at parse time
+  </Card>
+  <Card title="Mutation tracking" href="/guides/mutation-tracking">
+    Receive real-time notifications when values change at runtime
+  </Card>
+  <Card title="Rules" href="/guides/rules">
+    Disable callbacks per-property with RuleNoCallbacks
+  </Card>
+  <Card title="API: Callbacks reference" href="/api/callbacks-reference">
+    Full API reference for callbacks
+  </Card>
+</CardGroup>

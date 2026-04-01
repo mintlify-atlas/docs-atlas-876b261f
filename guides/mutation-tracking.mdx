@@ -1,0 +1,262 @@
+---
+title: "Mutation tracking"
+description: "Receiving real-time notifications when configuration values change at runtime"
+---
+
+Mutation tracking gives you a channel that emits a `Mutation` struct every time a configuration value changes. This is the idiomatic Go way to react to runtime configuration changes without writing callbacks on every property.
+
+## Enabling mutation tracking
+
+<Steps>
+  <Step title="Use Grow() or pass Tracking: true">
+    Either constructor enables the mutations channel:
+
+    ```go
+    import figtree "github.com/andreimerlescu/figtree/v2"
+
+    // Option 1: Grow() enables tracking by default
+    figs := figtree.Grow()
+
+    // Option 2: explicit options
+    figs := figtree.With(figtree.Options{
+        Tracking: true,
+        Harvest:  256, // channel buffer size
+    })
+    ```
+
+    `figtree.New()` does **not** enable tracking — use `Grow()` or `With(Options{Tracking: true})`.
+  </Step>
+
+  <Step title="Register your properties">
+    ```go
+    figs.NewInt("workers", 10, "Number of worker goroutines")
+    figs.NewString("endpoint", "http://localhost:8080", "API endpoint")
+    figs.NewBool("debug", false, "Enable debug mode")
+    ```
+  </Step>
+
+  <Step title="Parse or load configuration">
+    ```go
+    if err := figs.Parse(); err != nil {
+        log.Fatal(err)
+    }
+    ```
+  </Step>
+
+  <Step title="Read from figs.Mutations() in a goroutine">
+    Always consume the mutations channel in a separate goroutine with context cancellation so you can shut down cleanly:
+
+    ```go
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    go func() {
+        for {
+            select {
+            case <-ctx.Done():
+                return
+            case mutation, ok := <-figs.Mutations():
+                if !ok {
+                    // channel closed — Curse() was called
+                    return
+                }
+                log.Printf(
+                    "[mutation] %s (%s): %v -> %v at %s",
+                    mutation.Property,
+                    mutation.Mutagenesis,
+                    mutation.Old,
+                    mutation.New,
+                    mutation.When.Format(time.RFC3339),
+                )
+                if mutation.Error != nil {
+                    log.Printf("[mutation] error: %v", mutation.Error)
+                }
+            }
+        }
+    }()
+    ```
+  </Step>
+</Steps>
+
+## The `Mutation` struct
+
+Every value on `figs.Mutations()` is a `Mutation`:
+
+```go
+type Mutation struct {
+    Property    string      // name of the property that changed
+    Mutagenesis string      // type of the property (e.g. "string", "int", "bool")
+    Way         string      // how the change happened (e.g. "StoreString")
+    Old         interface{} // previous value
+    New         interface{} // new value
+    When        time.Time   // timestamp of the change
+    Error       error       // any error that occurred during the change
+}
+```
+
+### Field details
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `Property` | `string` | The lowercased property name (e.g. `"workers"`) |
+| `Mutagenesis` | `string` | The lowercased type name (e.g. `"int"`, `"string"`, `"list"`) |
+| `Way` | `string` | The store method used (e.g. `"StoreInt"`, `"StoreString"`) |
+| `Old` | `interface{}` | The value before the change |
+| `New` | `interface{}` | The value after the change |
+| `When` | `time.Time` | Timestamp when the mutation was emitted |
+| `Error` | `error` | Non-nil if an error occurred during the change |
+
+## Channel buffer size: `Harvest`
+
+The `Harvest` option sets the buffer size of the mutations channel. If the buffer fills up and nothing is reading from `Mutations()`, the sending goroutine blocks. Choose a size appropriate to your expected mutation rate:
+
+```go
+figs := figtree.With(figtree.Options{
+    Tracking: true,
+    Harvest:  1776, // buffer up to 1776 mutations
+})
+```
+
+When `Harvest` is 0 (the default), the channel is unbuffered. Any `Store*` call blocks until the mutations goroutine reads from the channel.
+
+## Polling environment variables: `Pollinate`
+
+The `Pollinate` option makes every getter call check the corresponding environment variable. If the env var has changed since the last read, a mutation is emitted automatically:
+
+```go
+figs := figtree.With(figtree.Options{
+    Tracking:  true,
+    Pollinate: true,
+    Harvest:   256,
+})
+figs.NewInt("workers", 10, "Number of workers")
+figs.Parse()
+
+// Later, in another terminal: export WORKERS=20
+workers := *figs.Int("workers") // detects env change, emits Mutation, returns 20
+```
+
+<Note>
+  `Pollinate` causes getters to call `os.Getenv` on every invocation. For properties accessed in tight loops, this overhead may be measurable. Combine with a larger `Harvest` buffer to avoid blocking the getter.
+</Note>
+
+## Pausing and resuming tracking
+
+### `Curse()` — disable tracking
+
+`Curse()` stops mutation tracking and **closes** the mutations channel. Any goroutine reading from `figs.Mutations()` will receive the zero value and `ok == false` after the channel drains:
+
+```go
+figs.Curse()
+// mutations channel is now closed
+// Store* calls no longer send to the channel
+```
+
+### `Recall()` — re-enable tracking
+
+`Recall()` creates a new mutations channel and re-enables tracking:
+
+```go
+figs.Recall()
+// a fresh channel is open; Store* calls resume sending mutations
+```
+
+<Warning>
+  After calling `Curse()`, you must update any goroutine that was reading the old channel — it will see `ok == false` and exit. Start a new consumer after calling `Recall()`.
+</Warning>
+
+## Full example
+
+```go
+package main
+
+import (
+    "context"
+    "log"
+    "os"
+    "os/signal"
+    "syscall"
+    "time"
+
+    figtree "github.com/andreimerlescu/figtree/v2"
+)
+
+func main() {
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    sigCh := make(chan os.Signal, 1)
+    signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
+    figs := figtree.With(figtree.Options{
+        Tracking:  true,
+        Pollinate: true,
+        Harvest:   256,
+    })
+
+    figs.NewInt("workers", 10, "Number of worker goroutines")
+    figs.NewString("endpoint", "http://localhost:8080", "API endpoint")
+
+    if err := figs.Parse(); err != nil {
+        log.Fatal(err)
+    }
+
+    // Consume mutations in a background goroutine
+    go func() {
+        for {
+            select {
+            case <-ctx.Done():
+                log.Println("mutation consumer: shutting down")
+                return
+            case mutation, ok := <-figs.Mutations():
+                if !ok {
+                    log.Println("mutations channel closed")
+                    return
+                }
+                log.Printf("[mutation] %s changed: %v -> %v (%s)",
+                    mutation.Property,
+                    mutation.Old,
+                    mutation.New,
+                    mutation.When.Format(time.RFC3339),
+                )
+            }
+        }
+    }()
+
+    // Demonstrate Curse/Recall
+    time.Sleep(1 * time.Second)
+    log.Println("cursing tree (pausing tracking)...")
+    figs.Curse()
+    time.Sleep(1 * time.Second)
+    log.Println("recalling tree (resuming tracking)...")
+    figs.Recall()
+
+    // Main event loop
+    for {
+        select {
+        case <-ctx.Done():
+            return
+        case sig := <-sigCh:
+            log.Printf("received signal %v, shutting down", sig)
+            cancel()
+        }
+    }
+}
+```
+
+---
+
+<CardGroup cols={2}>
+  <Card title="Callbacks" href="/guides/callbacks">
+    Attach functions to individual property lifecycle events
+  </Card>
+  <Card title="Concepts: Options" href="/concepts/options">
+    Full reference for Tracking, Harvest, and Pollinate options
+  </Card>
+  <Card title="API: Mutations reference" href="/api/mutations-reference">
+    Full API reference for the Mutation struct and channel
+  </Card>
+  <Card title="Concepts: Mutagenesis types" href="/concepts/mutagenesis-types">
+    Learn about the type system behind property mutations
+  </Card>
+</CardGroup>

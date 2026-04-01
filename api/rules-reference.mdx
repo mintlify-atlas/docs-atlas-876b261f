@@ -1,0 +1,150 @@
+---
+title: "Rules reference"
+description: "Complete reference for all RuleKind constants and rule methods"
+---
+
+Rules let you attach behavioral constraints to individual properties or to an entire tree. A rule fires at the relevant operation boundary — before a store, during resurrection, or when interacting with flags and environment variables.
+
+```go
+type RuleKind int
+```
+
+---
+
+## RuleKind constants
+
+| Constant | Value | Description |
+|----------|-------|-------------|
+| `RuleUndefined` | `0` | Default — no action. A property with only this rule behaves normally. |
+| `RulePreventChange` | `1` | Blocks all `Store*` methods on the property or tree. The current value is preserved silently. |
+| `RulePanicOnChange` | `2` | Panics when any `Store*` method is called on the property or tree. Use during development to detect unexpected mutations. |
+| `RuleNoValidations` | `3` | Skips all validators registered with `WithValidator`. Callbacks still run. |
+| `RuleNoCallbacks` | `4` | Skips all callbacks registered with `WithCallback`. Validators still run. |
+| `RuleCondemnedFromResurrection` | `5` | Panics if there is any attempt to resurrect (recall) a condemned property or tree. |
+| `RuleNoMaps` | `6` | Blocks `NewMap`, `StoreMap`, and `Map` from being called on the tree. |
+| `RuleNoLists` | `7` | Blocks `NewList`, `StoreList`, and `List` from being called on the tree. |
+| `RuleNoFlags` | `8` | Disables the `flag` package integration for the tree. |
+| `RuleNoEnv` | `9` | Skips all `os.Getenv` and environment variable resolution logic. |
+
+---
+
+## Methods
+
+### `WithRule`
+
+```go
+func (tree *figTree) WithRule(name string, rule RuleKind) Plant
+```
+
+Attaches a rule to a single named property. The name is normalised to lowercase before lookup, matching how properties are registered. If the property does not exist the call is a no-op and returns the tree unchanged.
+
+<ParamField path="name" type="string" required>
+  The name of the property to constrain (case-insensitive).
+</ParamField>
+
+<ParamField path="rule" type="RuleKind" required>
+  The rule constant to attach.
+</ParamField>
+
+**Returns:** `Plant` — the same tree, for method chaining.
+
+```go
+figs := figtree.With(figtree.Options{Tracking: true, Harvest: 10})
+figs.NewString("api-key", "", "API key").
+    WithRule("api-key", figtree.RulePreventChange)
+```
+
+---
+
+### `WithTreeRule`
+
+```go
+func (tree *figTree) WithTreeRule(rule RuleKind) Plant
+```
+
+Assigns a global rule to the entire tree. Tree rules apply to **all** properties and **all** operations — they take precedence over per-property rules of the same kind.
+
+<ParamField path="rule" type="RuleKind" required>
+  The rule constant to apply globally.
+</ParamField>
+
+**Returns:** `Plant` — the same tree, for method chaining.
+
+```go
+figs := figtree.With(figtree.Options{})
+figs.NewString("host", "localhost", "database host").
+    NewInt("port", 5432, "database port").
+    WithTreeRule(figtree.RuleNoEnv)
+```
+
+---
+
+## Per-property vs. tree-level rules
+
+A property can hold multiple rules. Rules are appended with each `WithRule` call.
+
+```go
+figs.NewString("secret", "", "application secret").
+    WithRule("secret", figtree.RuleNoEnv).
+    WithRule("secret", figtree.RulePreventChange)
+```
+
+When a tree rule is set it applies globally even to properties that do not have that rule registered individually:
+
+```go
+// Both "host" and "port" will ignore environment variables,
+// regardless of whether WithRule was called on them directly.
+figs.WithTreeRule(figtree.RuleNoEnv)
+```
+
+---
+
+## Rule interactions
+
+<Note>
+  `RulePreventChange` and `RulePanicOnChange` affect the same code path — `Store*` methods. Attaching both to the same property means the change is blocked first (no panic). Prefer `RulePreventChange` in production and `RulePanicOnChange` during development or testing.
+</Note>
+
+<Warning>
+  `RulePanicOnChange` will cause the process to exit if a `Store*` call is made on a protected property. Do not use this in production code paths where mutations are expected.
+</Warning>
+
+<Tip>
+  Use `RuleNoValidations` to bypass validation on a property that is loaded from a trusted internal source, while keeping validators active on properties that accept user input.
+</Tip>
+
+---
+
+## Example: locking a tree after startup
+
+Combine `Curse` and tree rules to produce a fully immutable tree after initial configuration is loaded:
+
+```go
+figs := figtree.With(figtree.Options{Tracking: true, Harvest: 50})
+figs.NewString("region", "us-east-1", "AWS region").
+    NewInt("replicas", 3, "replica count")
+
+if err := figs.Load(); err != nil {
+    log.Fatal(err)
+}
+
+// After Load, prevent any further changes to the entire tree.
+figs.WithTreeRule(figtree.RulePreventChange)
+```
+
+---
+
+<CardGroup cols={2}>
+  <Card title="Callbacks reference" icon="bell" href="/api/callbacks-reference">
+    Use `RuleNoCallbacks` to suppress callbacks on specific properties.
+  </Card>
+  <Card title="Validators reference" icon="shield-check" href="/api/validators-string">
+    Use `RuleNoValidations` to skip validators on trusted sources.
+  </Card>
+  <Card title="Mutations reference" icon="arrows-rotate" href="/api/mutations-reference">
+    `RulePreventChange` silently blocks the mutations channel from receiving new values.
+  </Card>
+  <Card title="Rules guide" icon="book" href="/guides/rules">
+    Practical patterns for applying rules in production.
+  </Card>
+</CardGroup>

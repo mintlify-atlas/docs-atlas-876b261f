@@ -1,0 +1,272 @@
+---
+title: "Options"
+description: "Configuring the Figtree tree with Options when using With()"
+---
+
+The `Options` struct is the configuration object passed to `figtree.With()`. Every field has a sensible zero value, so you only need to set the fields relevant to your use case.
+
+```go
+type Options struct {
+    ConfigFile        string
+    Tracking          bool
+    Germinate         bool
+    Harvest           int
+    Pollinate         bool
+    IgnoreEnvironment bool
+}
+```
+
+## Constructors and Options
+
+There are three ways to create a `Plant`. They all call `With()` under the hood.
+
+| Constructor | Equivalent call | Tracking enabled |
+|-------------|----------------|-----------------|
+| `figtree.New()` | `With(Options{Tracking: false})` | No |
+| `figtree.Grow()` | `With(Options{Tracking: true})` | Yes |
+| `figtree.With(opts)` | — | Depends on `opts.Tracking` |
+
+Use `New()` when you only need to read configuration once at startup and do not need to observe changes. Use `Grow()` or `With(Options{Tracking: true})` when you want to receive a `Mutation` on the channel returned by `figs.Mutations()` every time a value changes.
+
+---
+
+## Options fields
+
+### ConfigFile
+
+```go
+ConfigFile string
+```
+
+Path to the configuration file that `Load()` and `LoadFile()` will use. When set, this value takes priority over the package-level `ConfigFilePath` variable and the `CONFIG_FILE` environment variable.
+
+```go
+figs := figtree.With(figtree.Options{
+    ConfigFile: "/opt/app/production.config.yaml",
+})
+```
+
+If `ConfigFile` is empty, `Load()` falls back to the `CONFIG_FILE` environment variable and then to the package-level `ConfigFilePath` default.
+
+---
+
+### Tracking
+
+```go
+Tracking bool
+```
+
+When `true`, Figtree allocates a buffered `Mutation` channel. Every time a registered value changes, a `Mutation` struct is sent on that channel. Receive from it with `figs.Mutations()`.
+
+```go
+figs := figtree.With(figtree.Options{Tracking: true})
+figs.NewInt("workers", 10, "number of workers")
+_ = figs.Parse()
+
+go func() {
+    for mutation := range figs.Mutations() {
+        log.Printf("%s changed: %v → %v", mutation.Property, mutation.Old, mutation.New)
+    }
+}()
+```
+
+<Note>
+`figtree.Grow()` is a shorthand for `With(Options{Tracking: true})`. They are exactly equivalent.
+</Note>
+
+---
+
+### Germinate
+
+```go
+Germinate bool
+```
+
+When `true`, Figtree strips any CLI argument that starts with `-test.` from `os.Args` before parsing flags. This prevents test runner flags (such as `-test.run`, `-test.v`, `-test.timeout`) from being passed to your flag set when running `go test`.
+
+```go
+figs := figtree.With(figtree.Options{Germinate: true})
+```
+
+Enable this whenever you call `Parse()` or `Load()` inside code that will be exercised by `go test`.
+
+---
+
+### Harvest
+
+```go
+Harvest int
+```
+
+Sets the buffer size of the internal `Mutation` channel. Meaningful only when `Tracking` is `true`. A larger buffer lets mutations accumulate without blocking the goroutine that writes values. When `Harvest` is zero the channel buffer defaults to zero (unbuffered).
+
+```go
+figs := figtree.With(figtree.Options{
+    Tracking: true,
+    Harvest:  1024,
+})
+```
+
+<Tip>
+If your program updates many values in rapid succession and your consumer goroutine may lag, set `Harvest` to a value large enough to absorb bursts without dropping mutations.
+</Tip>
+
+---
+
+### Pollinate
+
+```go
+Pollinate bool
+```
+
+When `true`, every call to a typed getter (such as `figs.String("key")`) re-reads `os.Getenv` for that key before returning. This means configuration values automatically reflect environment variable changes that happen after `Parse()` or `Load()` was called.
+
+```go
+figs := figtree.With(figtree.Options{
+    Tracking:  true,
+    Pollinate: true,
+})
+```
+
+Without `Pollinate`, environment variables are only read during `Parse()`, `Load()`, or `Reload()`.
+
+---
+
+### IgnoreEnvironment
+
+```go
+IgnoreEnvironment bool
+```
+
+When `true`, Figtree calls `os.Clearenv()` inside `With()`, removing all environment variables from the process before any configuration is read. This is a destructive operation — it affects the entire process, not just Figtree.
+
+```go
+if _, ok := os.LookupEnv("NOENV"); ok {
+    figs = figtree.With(figtree.Options{IgnoreEnvironment: true})
+} else {
+    figs = figtree.Grow()
+}
+```
+
+<Warning>
+`IgnoreEnvironment: true` calls `os.Clearenv()` immediately when `With()` is called. All environment variables, including those used by the Go runtime and other libraries, are erased.
+</Warning>
+
+---
+
+## Package-level variables
+
+Two package-level variables affect default file loading and can be set before any constructor is called.
+
+### ConfigFilePath
+
+```go
+var ConfigFilePath string = filepath.Join(".", "config.yml")
+```
+
+The fallback config file path used by `Load()` when neither `Options.ConfigFile` nor the `CONFIG_FILE` environment variable is set. Override it before calling any constructor:
+
+```go
+figtree.ConfigFilePath = filepath.Join("/", "opt", "app", "default.config.json")
+figs := figtree.Grow()
+```
+
+### EnvironmentKey
+
+```go
+var EnvironmentKey string = "CONFIG_FILE"
+```
+
+The name of the environment variable that `Load()` reads to determine the config file path. Override it to use a different environment variable name:
+
+```go
+figtree.EnvironmentKey = "MYAPP_CONFIG"
+// Now Load() will check $MYAPP_CONFIG for the file path
+figs := figtree.New()
+```
+
+---
+
+## Full example
+
+```go
+package main
+
+import (
+    "log"
+    "os"
+    "path/filepath"
+    "strconv"
+
+    figtree "github.com/andreimerlescu/figtree/v2"
+)
+
+func main() {
+    opts := figtree.Options{
+        Tracking:  true,
+        Germinate: true,
+    }
+
+    if _, ok := os.LookupEnv("NOENV"); ok {
+        opts.IgnoreEnvironment = true
+    }
+    if path, ok := os.LookupEnv("MYAPP_CONFIG"); ok {
+        opts.ConfigFile = path
+    }
+    if s, ok := os.LookupEnv("HARVEST"); ok {
+        if n, err := strconv.Atoi(s); err == nil {
+            opts.Harvest = n
+        }
+    }
+
+    figs := figtree.With(opts)
+
+    figs.NewInt("workers", 10, "number of workers")
+    figs.NewString("endpoint", "http://localhost:8080", "API endpoint")
+
+    if err := figs.Load(); err != nil {
+        log.Fatal(err)
+    }
+
+    go func() {
+        for m := range figs.Mutations() {
+            log.Printf("mutation: %s %v → %v", m.Property, m.Old, m.New)
+        }
+    }()
+
+    log.Printf("workers=%d endpoint=%s",
+        *figs.Int("workers"),
+        *figs.String("endpoint"),
+    )
+}
+```
+
+---
+
+## Grow() vs With() with Tracking enabled
+
+These two calls produce identical results:
+
+```go
+figs := figtree.Grow()
+
+// is exactly the same as:
+figs := figtree.With(figtree.Options{Tracking: true})
+```
+
+`Grow()` exists as a more expressive, domain-friendly alias. Use whichever fits your reading preference; there is no functional difference.
+
+<CardGroup cols={2}>
+  <Card title="The Plant interface" href="/concepts/plant-interface">
+    All methods available on a Plant
+  </Card>
+  <Card title="Configuration sources" href="/concepts/config-sources">
+    How Load(), Parse(), and env vars interact
+  </Card>
+  <Card title="Mutation tracking guide" href="/guides/mutation-tracking">
+    Consuming the Mutations() channel
+  </Card>
+  <Card title="API: constructors" href="/api/constructors">
+    New(), Grow(), and With() reference
+  </Card>
+</CardGroup>

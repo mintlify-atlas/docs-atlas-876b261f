@@ -1,0 +1,294 @@
+---
+title: "Validators"
+description: "Using built-in and custom validators to enforce constraints on configuration values"
+---
+
+Validators let you enforce constraints on configuration values at parse time. Every validator is a function with the signature `func(interface{}) error`. You attach validators to registered properties using `WithValidator`, and all validators for a property run when `Parse()`, `ParseFile()`, `Load()`, or `LoadFile()` is called.
+
+## Registering a validator
+
+```go
+import figtree "github.com/andreimerlescu/figtree/v2"
+
+figs := figtree.Grow()
+figs.NewString("domain", "", "Domain name")
+figs.WithValidator("domain", figtree.AssureStringHasPrefix("https://"))
+```
+
+You can attach multiple validators to the same property. Each one runs independently and the first failure stops the chain:
+
+```go
+figs.WithValidator("domain", figtree.AssureStringLengthGreaterThan(3))
+figs.WithValidator("domain", figtree.AssureStringHasPrefix("https://"))
+figs.WithValidator("domain", figtree.AssureStringNotContains(" "))
+```
+
+You can also attach several validators in a single call using `WithValidators`:
+
+```go
+figs.WithValidators("domain",
+    figtree.AssureStringNotEmpty,
+    figtree.AssureStringHasPrefix("https://"),
+    figtree.AssureStringLengthGreaterThan(3),
+)
+```
+
+## When validators run
+
+Validators execute during:
+
+- `figs.Parse()` — parses CLI flags and env vars
+- `figs.ParseFile(path)` — parses a JSON, YAML, or INI file
+- `figs.Load()` — loads from the default config file or env vars
+- `figs.LoadFile(path)` — loads from a specific file
+
+<Note>
+  Validators do **not** run on `Store*` calls. To react to runtime value changes, use [callbacks](/guides/callbacks) or [mutation tracking](/guides/mutation-tracking).
+</Note>
+
+## Writing a custom validator
+
+Any function with the signature `func(interface{}) error` is a valid validator. Use a type switch to safely extract the underlying value:
+
+```go
+import (
+    "fmt"
+    "strings"
+
+    figtree "github.com/andreimerlescu/figtree/v2"
+)
+
+func validateDomainFormat(value interface{}) error {
+    var s string
+    switch v := value.(type) {
+    case string:
+        s = v
+    case *string:
+        s = *v
+    default:
+        return fmt.Errorf("expected string, got %T", value)
+    }
+    if !strings.Contains(s, ".") {
+        return fmt.Errorf("domain %q must contain at least one dot", s)
+    }
+    return nil
+}
+
+figs := figtree.Grow()
+figs.NewString("domain", "", "Domain name")
+figs.WithValidator("domain", validateDomainFormat)
+```
+
+## Skipping validators for a property
+
+Apply `RuleNoValidations` to a property to disable all of its validators regardless of what has been registered:
+
+```go
+figs.WithValidator("name", figtree.AssureStringNotEmpty)
+figs.WithRule("name", figtree.RuleNoValidations) // validators are skipped
+err := figs.Parse()                              // no validation error
+```
+
+---
+
+## Built-in validators by type
+
+<AccordionGroup>
+  <Accordion title="String validators">
+    All string validators accept `string` or `*string` as the `interface{}` value.
+
+    | Validator | Signature | Description |
+    |-----------|-----------|-------------|
+    | `AssureStringNotEmpty` | `FigValidatorFunc` | Rejects empty strings |
+    | `AssureStringLength` | `func(length int) FigValidatorFunc` | Minimum length (at least N chars) |
+    | `AssureStringNotLength` | `func(length int) FigValidatorFunc` | Rejects strings of exactly N chars |
+    | `AssureStringLengthGreaterThan` | `func(length int) FigValidatorFunc` | Length must exceed N |
+    | `AssureStringLengthLessThan` | `func(length int) FigValidatorFunc` | Length must be below N |
+    | `AssureStringSubstring` | `func(sub string) FigValidatorFunc` | Must contain a substring (case-sensitive) |
+    | `AssureStringContains` | `func(substring string) FigValidatorFunc` | Must contain a substring |
+    | `AssureStringNotContains` | `func(substring string) FigValidatorFunc` | Must not contain a substring |
+    | `AssureStringHasPrefix` | `func(prefix string) FigValidatorFunc` | Must start with prefix |
+    | `AssureStringHasSuffix` | `func(suffix string) FigValidatorFunc` | Must end with suffix |
+    | `AssureStringNoPrefix` | `func(prefix string) FigValidatorFunc` | Must not start with prefix |
+    | `AssureStringNoSuffix` | `func(suffix string) FigValidatorFunc` | Must not end with suffix |
+    | `AssureStringNoPrefixes` | `func(prefixes []string) FigValidatorFunc` | Must not start with any of the given prefixes |
+    | `AssureStringNoSuffixes` | `func(suffixes []string) FigValidatorFunc` | Must not end with any of the given suffixes |
+    | `AssureStringHasPrefixes` | `func(prefixes []string) FigValidatorFunc` | Must start with all of the given prefixes |
+    | `AssureStringHasSuffixes` | `func(suffixes []string) FigValidatorFunc` | Must end with all of the given suffixes |
+
+    ```go
+    figs := figtree.Grow()
+    figs.NewString("api_key", "", "API key")
+    figs.WithValidators("api_key",
+        figtree.AssureStringNotEmpty,
+        figtree.AssureStringLength(16),           // at least 16 chars
+        figtree.AssureStringNotLength(64),         // not exactly 64 chars
+        figtree.AssureStringHasPrefix("sk-"),      // must start with "sk-"
+        figtree.AssureStringNoSuffix("=="),        // must not end with "=="
+    )
+    ```
+  </Accordion>
+
+  <Accordion title="Bool validators">
+    Bool validators accept `bool` or `*bool`.
+
+    | Validator | Signature | Description |
+    |-----------|-----------|-------------|
+    | `AssureBoolTrue` | `FigValidatorFunc` | Value must be `true` |
+    | `AssureBoolFalse` | `FigValidatorFunc` | Value must be `false` |
+
+    ```go
+    figs := figtree.Grow()
+    figs.NewBool("terms_accepted", false, "User accepted terms")
+    figs.WithValidator("terms_accepted", figtree.AssureBoolTrue)
+    // Parse() returns an error if -terms_accepted is false
+    ```
+  </Accordion>
+
+  <Accordion title="Int validators">
+    Int validators accept `int` or `*int`.
+
+    | Validator | Signature | Description |
+    |-----------|-----------|-------------|
+    | `AssureIntPositive` | `func(interface{}) error` | Must be > 0 |
+    | `AssureIntNegative` | `func(interface{}) error` | Must be < 0 |
+    | `AssureIntGreaterThan` | `func(above int) FigValidatorFunc` | Must be greater than `above` (exclusive) |
+    | `AssureIntLessThan` | `func(below int) FigValidatorFunc` | Must be less than `below` (exclusive) |
+    | `AssureIntInRange` | `func(min, max int) FigValidatorFunc` | Must be within `[min, max]` inclusive |
+
+    ```go
+    import "runtime"
+
+    figs := figtree.Grow()
+    figs.NewInt("workers", 4, "Number of worker goroutines")
+    figs.WithValidator("workers", figtree.AssureIntInRange(1, runtime.GOMAXPROCS(0)))
+    ```
+  </Accordion>
+
+  <Accordion title="Int64 validators">
+    Int64 validators accept `int64` or `*int64`.
+
+    | Validator | Signature | Description |
+    |-----------|-----------|-------------|
+    | `AssureInt64Positive` | `func(interface{}) error` | Must be > 0 |
+    | `AssureInt64GreaterThan` | `func(above int64) FigValidatorFunc` | Must be greater than `above` (exclusive) |
+    | `AssureInt64LessThan` | `func(below int64) FigValidatorFunc` | Must be less than `below` (exclusive) |
+    | `AssureInt64InRange` | `func(min, max int64) FigValidatorFunc` | Must be within `[min, max]` inclusive |
+
+    ```go
+    figs := figtree.Grow()
+    figs.NewInt64("max_retries", 5, "Maximum retry attempts")
+    figs.WithValidator("max_retries", figtree.AssureInt64Positive)
+    figs.WithValidator("max_retries", figtree.AssureInt64InRange(1, 100))
+    ```
+  </Accordion>
+
+  <Accordion title="Float64 validators">
+    Float64 validators accept `float64` or `*float64`.
+
+    | Validator | Signature | Description |
+    |-----------|-----------|-------------|
+    | `AssureFloat64Positive` | `FigValidatorFunc` | Must be > 0 |
+    | `AssureFloat64NotNaN` | `FigValidatorFunc` | Must not be NaN |
+    | `AssureFloat64GreaterThan` | `func(above float64) FigValidatorFunc` | Must be greater than `above` (exclusive) |
+    | `AssureFloat64LessThan` | `func(below float64) FigValidatorFunc` | Must be less than `below` (exclusive) |
+    | `AssureFloat64InRange` | `func(min, max float64) FigValidatorFunc` | Must be within `[min, max]` inclusive |
+
+    ```go
+    figs := figtree.Grow()
+    figs.NewFloat64("threshold", 0.75, "Confidence threshold")
+    figs.WithValidators("threshold",
+        figtree.AssureFloat64NotNaN,
+        figtree.AssureFloat64InRange(0.0, 1.0),
+    )
+    ```
+  </Accordion>
+
+  <Accordion title="Duration validators">
+    Duration validators accept `time.Duration` or `*time.Duration`.
+
+    | Validator | Signature | Description |
+    |-----------|-----------|-------------|
+    | `AssureDurationPositive` | `FigValidatorFunc` | Must be > 0 |
+    | `AssureDurationGreaterThan` | `func(above time.Duration) FigValidatorFunc` | Must be greater than `above` (exclusive) |
+    | `AssureDurationLessThan` | `func(below time.Duration) FigValidatorFunc` | Must be less than `below` (exclusive) |
+    | `AssureDurationMin` | `func(min time.Duration) FigValidatorFunc` | Must be at least `min` |
+    | `AssureDurationMax` | `func(max time.Duration) FigValidatorFunc` | Must not exceed `max` |
+
+    ```go
+    import "time"
+
+    figs := figtree.Grow()
+    figs.NewUnitDuration("timeout", 30*time.Second, time.Second, "Request timeout")
+    figs.WithValidators("timeout",
+        figtree.AssureDurationPositive,
+        figtree.AssureDurationMin(5*time.Second),
+        figtree.AssureDurationMax(12*time.Hour),
+    )
+    ```
+  </Accordion>
+
+  <Accordion title="List validators">
+    List validators accept `[]string`, `*[]string`, `ListFlag`, or `*ListFlag`.
+
+    | Validator | Signature | Description |
+    |-----------|-----------|-------------|
+    | `AssureListNotEmpty` | `FigValidatorFunc` | List must not be empty |
+    | `AssureListMinLength` | `func(min int) FigValidatorFunc` | List must have at least `min` elements |
+    | `AssureListLength` | `func(length int) FigValidatorFunc` | List must have exactly `length` elements |
+    | `AssureListContains` | `func(inside string) FigValidatorFunc` | List must contain the string |
+    | `AssureListNotContains` | `func(not string) FigValidatorFunc` | List must not contain the string |
+    | `AssureListContainsKey` | `func(key string) FigValidatorFunc` | List must contain the key string |
+
+    ```go
+    figs := figtree.Grow()
+    figs.NewList("servers", []string{"server1"}, "Server list")
+    figs.WithValidators("servers",
+        figtree.AssureListNotEmpty,
+        figtree.AssureListMinLength(1),
+        figtree.AssureListNotContains("localhost"),
+    )
+    ```
+  </Accordion>
+
+  <Accordion title="Map validators">
+    Map validators accept `map[string]string`, `*map[string]string`, `MapFlag`, or `*MapFlag`.
+
+    | Validator | Signature | Description |
+    |-----------|-----------|-------------|
+    | `AssureMapNotEmpty` | `FigValidatorFunc` | Map must not be empty |
+    | `AssureMapHasKey` | `func(key string) FigValidatorFunc` | Map must contain `key` |
+    | `AssureMapHasNoKey` | `func(key string) FigValidatorFunc` | Map must not contain `key` |
+    | `AssureMapHasKeys` | `func(keys []string) FigValidatorFunc` | Map must contain all listed keys |
+    | `AssureMapValueMatches` | `func(key, match string) FigValidatorFunc` | Key must exist and its value must equal `match` |
+    | `AssureMapLength` | `func(length int) FigValidatorFunc` | Map must have exactly `length` entries |
+    | `AssureMapNotLength` | `func(length int) FigValidatorFunc` | Map must not have exactly `length` entries |
+
+    ```go
+    figs := figtree.Grow()
+    figs.NewMap("metadata", map[string]string{"env": "prod"}, "Metadata")
+    figs.WithValidators("metadata",
+        figtree.AssureMapNotEmpty,
+        figtree.AssureMapHasKeys([]string{"env", "version"}),
+        figtree.AssureMapValueMatches("env", "prod"),
+    )
+    ```
+  </Accordion>
+</AccordionGroup>
+
+---
+
+<CardGroup cols={2}>
+  <Card title="Callbacks" href="/guides/callbacks">
+    Run functions before or after reads, changes, or verification
+  </Card>
+  <Card title="Rules" href="/guides/rules">
+    Disable validations per-property or tree-wide with RuleNoValidations
+  </Card>
+  <Card title="API: String validators" href="/api/validators-string">
+    Full reference for all string Assure functions
+  </Card>
+  <Card title="API: Numeric validators" href="/api/validators-numeric">
+    Full reference for int, int64, float64, and duration validators
+  </Card>
+</CardGroup>

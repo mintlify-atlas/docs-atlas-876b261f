@@ -1,0 +1,334 @@
+---
+title: "Collection methods"
+description: "Registering, reading, and storing list and map configuration properties"
+---
+
+Figtree supports two collection types: ordered string lists (`[]string`) and string-keyed maps (`map[string]string`). They are managed through the `Listable` and `Mappable` interfaces, both part of the `Plant` interface.
+
+Both types accept delimited strings from CLI flags and environment variables. The delimiters are controlled by package-level variables that can be overridden before constructing a `Plant`.
+
+---
+
+## Separator variables
+
+| Variable | Default | Controls |
+|---|---|---|
+| `figtree.ListSeparator` | `","` | Delimiter for splitting list values from CLI flags and env vars. |
+| `figtree.MapSeparator` | `","` | Delimiter for splitting key-value pairs in map values. |
+| `figtree.MapKeySeparator` | `"="` | Delimiter for separating the key from the value within each map pair. |
+
+```go
+// Override before constructing a Plant
+figtree.ListSeparator   = "|"
+figtree.MapSeparator    = ";"
+figtree.MapKeySeparator = ":"
+
+figs := figtree.New()
+```
+
+<Warning>
+These are package-level variables, not per-instance options. Changing them affects all active `Plant` instances in the same process.
+</Warning>
+
+---
+
+## List type
+
+A list property stores a `[]string` parsed from a comma-separated flag value or environment variable. The `List()` getter always returns a **sorted copy** of the stored slice.
+
+### NewList()
+
+```go
+func (p Plant) NewList(name string, value []string, usage string) Plant
+```
+
+Registers a new list property. Must be called before `Parse()`, `Load()`, or any `ParseFile()` / `LoadFile()` call.
+
+<ParamField path="name" type="string" required>
+  The flag name. Exposed as `-name=ONE,TWO,THREE` on the command line and as the uppercase env var `NAME`.
+</ParamField>
+
+<ParamField path="value" type="[]string" required>
+  Default value. Pass an empty slice (`[]string{}`) for no default.
+</ParamField>
+
+<ParamField path="usage" type="string" required>
+  Human-readable description displayed by `-h` and `UsageString()`.
+</ParamField>
+
+<ResponseField name="Plant" type="Plant">
+  The same Plant instance, enabling method chaining.
+</ResponseField>
+
+```go
+import (
+    "log"
+    "strings"
+    "github.com/andreimerlescu/figtree/v2"
+)
+
+figs := figtree.New()
+figs.NewList("servers", []string{"server1", "server2"}, "comma-separated list of servers")
+figs.WithValidator("servers", figtree.AssureListNotEmpty)
+if err := figs.Parse(); err != nil {
+    log.Fatal(err)
+}
+servers := *figs.List("servers")
+log.Println("servers:", strings.Join(servers, ", "))
+// CLI: -servers=server3,server4
+// ENV: SERVERS=server3,server4
+```
+
+<Note>
+If the `RuleNoLists` tree rule is active (set via `figs.WithTreeRule(figtree.RuleNoLists)`), `NewList()` silently returns without registering the property.
+</Note>
+
+---
+
+### List()
+
+```go
+func (p Plant) List(name string) *[]string
+```
+
+Returns a pointer to a sorted copy of the current list value. The copy is independent of the internal storage—modifying the returned slice does not affect the stored value. Returns `nil` if the property is not registered.
+
+When `Options.Pollinate` is `true`, re-reads the environment on every call and calls `StoreList()` if the environment value differs from the stored value.
+
+<ParamField path="name" type="string" required>
+  The registered property name (case-insensitive).
+</ParamField>
+
+<ResponseField name="*[]string" type="*[]string">
+  Pointer to a sorted copy of the current list. Returns `nil` for unregistered properties.
+</ResponseField>
+
+```go
+servers := *figs.List("servers")
+for _, s := range servers {
+    fmt.Println("connecting to:", s)
+}
+```
+
+<Tip>
+`List()` always returns a sorted copy. If insertion order matters, store the original order in a separate property or access the raw value through `FigFlesh()`.
+</Tip>
+
+---
+
+### StoreList()
+
+```go
+func (p Plant) StoreList(name string, value []string) Plant
+```
+
+Replaces the current value of a registered list property at runtime. Emits a `Mutation` when `Tracking` is enabled.
+
+<ParamField path="name" type="string" required>
+  The registered property name.
+</ParamField>
+
+<ParamField path="value" type="[]string" required>
+  The new list value.
+</ParamField>
+
+<ResponseField name="Plant" type="Plant">
+  The same Plant instance, enabling method chaining.
+</ResponseField>
+
+```go
+figs.StoreList("servers", []string{"primary", "secondary", "tertiary"})
+fmt.Println(*figs.List("servers")) // [primary secondary tertiary] (sorted)
+```
+
+---
+
+## Map type
+
+A map property stores a `map[string]string` parsed from a delimited string of `key=value` pairs. The delimiter between pairs is controlled by `figtree.MapSeparator` (default `,`) and the delimiter between key and value is controlled by `figtree.MapKeySeparator` (default `=`).
+
+### NewMap()
+
+```go
+func (p Plant) NewMap(name string, value map[string]string, usage string) Plant
+```
+
+Registers a new map property. Must be called before `Parse()`, `Load()`, or any `ParseFile()` / `LoadFile()` call.
+
+<ParamField path="name" type="string" required>
+  The flag name. Exposed as `-name=key=val,key2=val2` on the command line and as the uppercase env var `NAME`.
+</ParamField>
+
+<ParamField path="value" type="map[string]string" required>
+  Default value. Pass an empty map (`map[string]string{}`) for no default.
+</ParamField>
+
+<ParamField path="usage" type="string" required>
+  Human-readable description.
+</ParamField>
+
+<ResponseField name="Plant" type="Plant">
+  The same Plant instance, enabling method chaining.
+</ResponseField>
+
+```go
+import (
+    "log"
+    "github.com/andreimerlescu/figtree/v2"
+)
+
+figs := figtree.New()
+figs.NewMap("metadata", map[string]string{
+    "env":     "prod",
+    "version": "1.0",
+}, "key=value metadata pairs")
+figs.WithValidator("metadata", figtree.AssureMapHasKeys([]string{"env", "version"}))
+if err := figs.Parse(); err != nil {
+    log.Fatal(err)
+}
+meta := *figs.Map("metadata")
+fmt.Println("env:", meta["env"])
+// CLI: -metadata=env=prod,version=2.0
+// ENV: METADATA=env=prod,version=2.0
+```
+
+<Note>
+If the `RuleNoMaps` tree rule is active, `NewMap()` silently returns without registering the property.
+</Note>
+
+---
+
+### Map()
+
+```go
+func (p Plant) Map(name string) *map[string]string
+```
+
+Returns a pointer to a copy of the current map value. The copy is independent of internal storage. Returns `nil` if the property is not registered.
+
+When `Options.Pollinate` is `true`, re-reads the environment on every call and calls `StoreMap()` if the parsed env value differs from the stored map.
+
+<ParamField path="name" type="string" required>
+  The registered property name (case-insensitive).
+</ParamField>
+
+<ResponseField name="*map[string]string" type="*map[string]string">
+  Pointer to a copy of the current map. Returns `nil` for unregistered properties.
+</ResponseField>
+
+```go
+meta := *figs.Map("metadata")
+if version, ok := meta["version"]; ok {
+    fmt.Println("version:", version)
+}
+```
+
+---
+
+### MapKeys()
+
+```go
+func (p Plant) MapKeys(name string) []string
+```
+
+Returns the keys of the stored map as an unsorted `[]string`. Useful for iteration without loading the full map copy.
+
+<ParamField path="name" type="string" required>
+  The registered property name (case-insensitive).
+</ParamField>
+
+<ResponseField name="[]string" type="[]string">
+  The keys of the current map value. Returns `nil` for unregistered properties.
+</ResponseField>
+
+```go
+keys := figs.MapKeys("metadata")
+for _, k := range keys {
+    fmt.Println("key:", k)
+}
+```
+
+---
+
+### StoreMap()
+
+```go
+func (p Plant) StoreMap(name string, value map[string]string) Plant
+```
+
+Replaces the current value of a registered map property at runtime. Emits a `Mutation` when `Tracking` is enabled.
+
+<ParamField path="name" type="string" required>
+  The registered property name.
+</ParamField>
+
+<ParamField path="value" type="map[string]string" required>
+  The new map value.
+</ParamField>
+
+<ResponseField name="Plant" type="Plant">
+  The same Plant instance, enabling method chaining.
+</ResponseField>
+
+```go
+figs.StoreMap("metadata", map[string]string{
+    "env":     "staging",
+    "version": "2.1",
+    "region":  "us-east-1",
+})
+meta := *figs.Map("metadata")
+fmt.Println(meta["region"]) // "us-east-1"
+```
+
+---
+
+## Parsing from CLI and environment
+
+### List parsing
+
+Given `figtree.ListSeparator = ","` (the default):
+
+```bash
+# CLI flag
+-servers=alpha,beta,gamma
+
+# Environment variable
+SERVERS=alpha,beta,gamma
+```
+
+Both produce `[]string{"alpha", "beta", "gamma"}` (sorted on return).
+
+### Map parsing
+
+Given `figtree.MapSeparator = ","` and `figtree.MapKeySeparator = "="` (the defaults):
+
+```bash
+# CLI flag
+-metadata=env=prod,version=1.0,region=us-east-1
+
+# Environment variable
+METADATA=env=prod,version=1.0,region=us-east-1
+```
+
+Both produce `map[string]string{"env": "prod", "version": "1.0", "region": "us-east-1"}`.
+
+### YAML / JSON config files
+
+In config files, lists and maps can be expressed natively:
+
+```yaml
+servers:
+  - alpha
+  - beta
+  - gamma
+metadata:
+  env: prod
+  version: "1.0"
+```
+
+Or as a delimited string (matching the CLI format):
+
+```yaml
+servers: "alpha,beta,gamma"
+metadata: "env=prod,version=1.0"
+```

@@ -1,0 +1,131 @@
+---
+title: "Aliases"
+description: "Registering short-form names for configuration properties"
+---
+
+Aliases let you register a short or alternative name for an existing property. Once an alias is registered, you can use it with any getter — `figs.String("alias")`, `figs.StoreString("alias", ...)`, and so on — exactly as if it were the original name.
+
+## How aliases work
+
+When you call `WithAlias`, figtree:
+
+1. Stores a mapping from the alias to the canonical property name (both lowercased)
+2. Registers the alias as a CLI flag pointing to the same underlying value
+
+This means `-alias value` on the command line has the same effect as `-propertyname value`.
+
+## Registering an alias
+
+```go
+func (tree *figTree) WithAlias(name, alias string) Plant
+```
+
+- `name` — the canonical property name (must already be registered with `New*`)
+- `alias` — the short-form name to map to `name`
+
+Both `name` and `alias` are lowercased internally, so aliases are case-insensitive.
+
+```go
+import figtree "github.com/andreimerlescu/figtree/v2"
+
+figs := figtree.Grow()
+
+// Register the property first
+figs.NewString("database_connection_string", "postgres://localhost/app", "Database DSN")
+
+// Then register a short alias
+figs.WithAlias("database_connection_string", "dsn")
+
+if err := figs.Parse(); err != nil {
+    log.Fatal(err)
+}
+
+// Access via the alias — identical to figs.String("database_connection_string")
+dsn := *figs.String("dsn")
+log.Println("DSN:", dsn)
+```
+
+On the command line, both forms work:
+
+```bash
+./app -database_connection_string "postgres://prod/app"
+./app -dsn "postgres://prod/app"
+```
+
+## Chaining aliases
+
+`WithAlias` returns `Plant`, so you can chain it inline with your property registration:
+
+```go
+figs.NewString("max_idle_connections", "10", "Maximum idle DB connections").
+    WithAlias("max_idle_connections", "max_idle")
+```
+
+## Practical use case: verbose names with short flags
+
+Long, descriptive property names improve readability in config files and env vars. Aliases let you keep those names while also supporting compact CLI flags:
+
+```go
+figs := figtree.Grow()
+
+figs.NewInt("http_server_listen_port", 8080, "Port the HTTP server listens on")
+figs.WithAlias("http_server_listen_port", "port")
+
+figs.NewString("tls_certificate_file_path", "", "Path to TLS certificate")
+figs.WithAlias("tls_certificate_file_path", "cert")
+
+figs.NewString("tls_private_key_file_path", "", "Path to TLS private key")
+figs.WithAlias("tls_private_key_file_path", "key")
+
+figs.WithValidator("http_server_listen_port", figtree.AssureIntInRange(1, 65535))
+
+if err := figs.Parse(); err != nil {
+    log.Fatal(err)
+}
+
+port := *figs.Int("port")  // reads the same value as figs.Int("http_server_listen_port")
+log.Printf("listening on port %d", port)
+```
+
+The above allows both of these invocations:
+
+```bash
+./app -http_server_listen_port 9090
+./app -port 9090
+```
+
+## Case-insensitivity
+
+Alias keys are always stored in lowercase. This means `figs.String("DSN")`, `figs.String("Dsn")`, and `figs.String("dsn")` all resolve to the same property:
+
+```go
+figs.WithAlias("database_connection_string", "DSN") // stored as "dsn"
+
+*figs.String("DSN") // works
+*figs.String("dsn") // works — same result
+```
+
+<Note>
+  An alias that duplicates an existing alias is silently ignored. figtree checks for the alias key before storing and returns without overwriting if it already exists.
+</Note>
+
+<Warning>
+  Always register the property with `New*` **before** calling `WithAlias`. If the property does not exist when `WithAlias` is called, the alias registration will fail silently and a message will be printed to stdout.
+</Warning>
+
+---
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" href="/quickstart">
+    See a complete working example with properties registered
+  </Card>
+  <Card title="Concepts: Plant interface" href="/concepts/plant-interface">
+    The interface that WithAlias belongs to
+  </Card>
+  <Card title="API: String methods" href="/api/string-methods">
+    Getter and setter reference for string properties
+  </Card>
+  <Card title="Rules" href="/guides/rules">
+    Control property behavior with RuleNoFlags and other rules
+  </Card>
+</CardGroup>

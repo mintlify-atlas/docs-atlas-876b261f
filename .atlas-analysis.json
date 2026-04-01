@@ -1,0 +1,128 @@
+{
+  "projectType": "sdk-library",
+  "projectName": "Figtree",
+  "projectDescription": "A Go library for managing CLI application configuration via flags, environment variables, and config files, with mutation tracking, validators, and callbacks.",
+  "theme": "luma",
+  "primaryColor": "#94cb04",
+  "lightColor": "#545454",
+  "darkColor": null,
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/plant-interface",
+              "concepts/mutagenesis-types",
+              "concepts/options",
+              "concepts/config-sources"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/validators",
+              "guides/callbacks",
+              "guides/mutation-tracking",
+              "guides/rules",
+              "guides/aliases"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Constructors",
+            "pages": [
+              "api/constructors"
+            ]
+          },
+          {
+            "group": "Type Methods",
+            "pages": [
+              "api/string-methods",
+              "api/numeric-methods",
+              "api/duration-methods",
+              "api/collection-methods"
+            ]
+          },
+          {
+            "group": "Validators",
+            "pages": [
+              "api/validators-string",
+              "api/validators-numeric",
+              "api/validators-collections"
+            ]
+          },
+          {
+            "group": "Advanced",
+            "pages": [
+              "api/rules-reference",
+              "api/callbacks-reference",
+              "api/mutations-reference"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Multi-source configuration: flags, environment variables, YAML/JSON/INI files",
+    "Strongly-typed getters and setters for String, Bool, Int, Int64, Float64, Duration, UnitDuration, List, and Map",
+    "Mutation tracking via a channel — receive notifications whenever a config value changes",
+    "36+ built-in validators (AssureStringNotEmpty, AssureIntInRange, AssureDurationMax, etc.)",
+    "Per-property and tree-level rules (RulePreventChange, RuleNoFlags, RuleNoEnv, etc.)",
+    "Lifecycle callbacks: BeforeRead, AfterRead, BeforeChange, AfterChange, BeforeVerify, AfterVerify",
+    "Environment variable polling (Pollinate) to keep values fresh on every read",
+    "Curse/Recall to pause and resume mutation tracking at runtime",
+    "Alias support for short-form flag names"
+  ],
+  "publicApiSurface": [
+    "figtree.New() Plant",
+    "figtree.Grow() Plant",
+    "figtree.With(opts Options) Plant",
+    "Plant.NewString / NewBool / NewInt / NewInt64 / NewFloat64 / NewDuration / NewUnitDuration / NewList / NewMap",
+    "Plant.String / Bool / Int / Int64 / Float64 / Duration / UnitDuration / List / Map",
+    "Plant.StoreString / StoreBool / StoreInt / StoreInt64 / StoreFloat64 / StoreDuration / StoreUnitDuration / StoreList / StoreMap",
+    "Plant.Store(mutagenesis, key, value)",
+    "Plant.WithValidator(name, func(interface{}) error) Plant",
+    "Plant.WithCallback(name, CallbackWhen, CallbackFunc) Plant",
+    "Plant.WithRule(name, RuleKind) Plant",
+    "Plant.WithTreeRule(RuleKind) Plant",
+    "Plant.WithAlias(name, alias) Plant",
+    "Plant.Parse() error",
+    "Plant.ParseFile(filename) error",
+    "Plant.Load() error",
+    "Plant.LoadFile(path) error",
+    "Plant.Reload() error",
+    "Plant.SaveTo(path) error",
+    "Plant.ReadFrom(path) error",
+    "Plant.Mutations() <-chan Mutation",
+    "Plant.Curse() / Plant.Recall()",
+    "Plant.Usage() / Plant.UsageString() string",
+    "Plant.FigFlesh(name) Flesh",
+    "Plant.ErrorFor(name) error",
+    "figtree.AssureStringNotEmpty / AssureStringHasPrefix / AssureStringContains / ...",
+    "figtree.AssureIntInRange / AssureIntGreaterThan / AssureIntLessThan / ...",
+    "figtree.AssureFloat64InRange / AssureFloat64Positive / AssureFloat64NotNaN / ...",
+    "figtree.AssureDurationMin / AssureDurationMax / AssureDurationGreaterThan / ...",
+    "figtree.AssureListNotEmpty / AssureListContains / AssureListLength / ...",
+    "figtree.AssureMapHasKey / AssureMapHasKeys / AssureMapValueMatches / ...",
+    "figtree.RulePreventChange / RuleNoFlags / RuleNoEnv / RuleNoValidations / RuleNoCallbacks / ...",
+    "figtree.CallbackAfterRead / CallbackAfterChange / CallbackAfterVerify / ...",
+    "figtree.Options{Tracking, Germinate, Harvest, Pollinate, IgnoreEnvironment, ConfigFile}",
+    "figtree.Mutation{Property, Mutagenesis, Way, Old, New, When, Error}",
+    "figtree.Version() string"
+  ]
+}

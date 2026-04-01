@@ -1,0 +1,291 @@
+---
+title: "Numeric methods"
+description: "Registering, reading, and storing integer and float configuration properties"
+---
+
+Figtree supports three numeric types: `int`, `int64`, and `float64`. Each type has a matching `NewXxx`, getter, and `StoreXxx` method. They are defined by the `Intable`, `Intable64`, and `Floatable` interfaces respectively, all of which are part of the `Plant` interface.
+
+All property names are normalized to lowercase internally.
+
+---
+
+## Int type
+
+### NewInt()
+
+```go
+func (p Plant) NewInt(name string, value int, usage string) Plant
+```
+
+Registers a new `int` property and wires it to the flag parser. Must be called before `Parse()`, `Load()`, or any `ParseFile()` / `LoadFile()` call.
+
+<ParamField path="name" type="string" required>
+  The flag name. Exposed as `-name=10` on the command line and as the uppercase env var `NAME`.
+</ParamField>
+
+<ParamField path="value" type="int" required>
+  Default value used when the flag is not provided.
+</ParamField>
+
+<ParamField path="usage" type="string" required>
+  Human-readable description displayed by `-h` and `UsageString()`.
+</ParamField>
+
+<ResponseField name="Plant" type="Plant">
+  The same Plant instance, enabling method chaining.
+</ResponseField>
+
+```go
+import (
+    "log"
+    "runtime"
+    "github.com/andreimerlescu/figtree/v2"
+)
+
+figs := figtree.New()
+figs.NewInt("workers", 10, "number of concurrent workers")
+figs.WithValidator("workers", figtree.AssureIntInRange(1, runtime.GOMAXPROCS(0)))
+if err := figs.Parse(); err != nil {
+    log.Fatal(err)
+}
+workers := *figs.Int("workers")
+```
+
+---
+
+### Int()
+
+```go
+func (p Plant) Int(name string) *int
+```
+
+Returns a pointer to the current `int` value for the named property. Returns `nil` if the property has not been registered. When `Options.Pollinate` is `true`, checks the environment on every call.
+
+<ParamField path="name" type="string" required>
+  The registered property name (case-insensitive).
+</ParamField>
+
+<ResponseField name="*int" type="*int">
+  Pointer to the current value. Returns `nil` for unregistered properties.
+</ResponseField>
+
+```go
+workers := *figs.Int("workers")
+fmt.Printf("starting %d workers\n", workers)
+```
+
+---
+
+### StoreInt()
+
+```go
+func (p Plant) StoreInt(name string, value int) Plant
+```
+
+Replaces the current value of a registered `int` property. Emits a `Mutation` on the channel when `Tracking` is enabled.
+
+<ParamField path="name" type="string" required>
+  The registered property name.
+</ParamField>
+
+<ParamField path="value" type="int" required>
+  The new value.
+</ParamField>
+
+<ResponseField name="Plant" type="Plant">
+  The same Plant instance, enabling method chaining.
+</ResponseField>
+
+```go
+figs.StoreInt("workers", 20)
+fmt.Println(*figs.Int("workers")) // 20
+```
+
+---
+
+## Int64 type
+
+### NewInt64()
+
+```go
+func (p Plant) NewInt64(name string, value int64, usage string) Plant
+```
+
+Registers a new `int64` property. Use `int64` when your values can exceed the 32-bit signed integer range or when interoperating with APIs that require `int64`.
+
+<ParamField path="name" type="string" required>
+  The flag name.
+</ParamField>
+
+<ParamField path="value" type="int64" required>
+  Default value.
+</ParamField>
+
+<ParamField path="usage" type="string" required>
+  Human-readable description.
+</ParamField>
+
+<ResponseField name="Plant" type="Plant">
+  The same Plant instance, enabling method chaining.
+</ResponseField>
+
+```go
+figs := figtree.New()
+figs.NewInt64("maxRetries", 5, "maximum number of retry attempts")
+figs.WithValidator("maxRetries", figtree.AssurePositiveInt64)
+if err := figs.Parse(); err != nil {
+    log.Fatal(err)
+}
+maxRetries := *figs.Int64("maxRetries")
+```
+
+---
+
+### Int64()
+
+```go
+func (p Plant) Int64(name string) *int64
+```
+
+Returns a pointer to the current `int64` value for the named property.
+
+<ParamField path="name" type="string" required>
+  The registered property name (case-insensitive).
+</ParamField>
+
+<ResponseField name="*int64" type="*int64">
+  Pointer to the current value. Returns `nil` for unregistered properties.
+</ResponseField>
+
+```go
+retries := *figs.Int64("maxRetries")
+```
+
+---
+
+### StoreInt64()
+
+```go
+func (p Plant) StoreInt64(name string, value int64) Plant
+```
+
+Replaces the current value of a registered `int64` property at runtime.
+
+<ParamField path="name" type="string" required>
+  The registered property name.
+</ParamField>
+
+<ParamField path="value" type="int64" required>
+  The new value.
+</ParamField>
+
+<ResponseField name="Plant" type="Plant">
+  The same Plant instance, enabling method chaining.
+</ResponseField>
+
+```go
+figs.StoreInt64("maxRetries", 10)
+```
+
+---
+
+## Float64 type
+
+### NewFloat64()
+
+```go
+func (p Plant) NewFloat64(name string, value float64, usage string) Plant
+```
+
+Registers a new `float64` property. Use for rate limits, thresholds, probabilities, or any fractional numeric configuration.
+
+<ParamField path="name" type="string" required>
+  The flag name. Exposed as `-name=0.75` on the command line.
+</ParamField>
+
+<ParamField path="value" type="float64" required>
+  Default value.
+</ParamField>
+
+<ParamField path="usage" type="string" required>
+  Human-readable description.
+</ParamField>
+
+<ResponseField name="Plant" type="Plant">
+  The same Plant instance, enabling method chaining.
+</ResponseField>
+
+```go
+figs := figtree.New()
+figs.NewFloat64("threshold", 0.75, "acceptance threshold (0.0–1.0)")
+figs.WithValidator("threshold", figtree.AssureFloat64InRange(0.0, 1.0))
+if err := figs.Parse(); err != nil {
+    log.Fatal(err)
+}
+threshold := *figs.Float64("threshold")
+fmt.Printf("threshold: %.2f\n", threshold)
+```
+
+---
+
+### Float64()
+
+```go
+func (p Plant) Float64(name string) *float64
+```
+
+Returns a pointer to the current `float64` value for the named property.
+
+<ParamField path="name" type="string" required>
+  The registered property name (case-insensitive).
+</ParamField>
+
+<ResponseField name="*float64" type="*float64">
+  Pointer to the current value. Returns `nil` for unregistered properties.
+</ResponseField>
+
+```go
+t := *figs.Float64("threshold")
+if t < 0.5 {
+    log.Println("threshold is below 50%")
+}
+```
+
+---
+
+### StoreFloat64()
+
+```go
+func (p Plant) StoreFloat64(name string, value float64) Plant
+```
+
+Replaces the current value of a registered `float64` property at runtime.
+
+<ParamField path="name" type="string" required>
+  The registered property name.
+</ParamField>
+
+<ParamField path="value" type="float64" required>
+  The new value.
+</ParamField>
+
+<ResponseField name="Plant" type="Plant">
+  The same Plant instance, enabling method chaining.
+</ResponseField>
+
+```go
+figs.StoreFloat64("threshold", 0.9)
+fmt.Printf("%.2f\n", *figs.Float64("threshold")) // 0.90
+```
+
+---
+
+## Environment variable behavior
+
+For all numeric types, the environment variable name is the uppercase form of the property name. For example, a property registered as `"workers"` is overridden by `WORKERS=20` in the environment.
+
+When `Options.Pollinate` is `true`, the getter re-reads the environment on every call and automatically calls `StoreXxx()` if the value has changed. Without `Pollinate`, environment variables are read only once during `Parse()` or `Load()`.
+
+```bash
+WORKERS=20 THRESHOLD=0.99 go run ./myapp
+```

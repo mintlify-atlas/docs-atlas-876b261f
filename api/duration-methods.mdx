@@ -1,0 +1,256 @@
+---
+title: "Duration methods"
+description: "Registering, reading, and storing time.Duration configuration properties"
+---
+
+Figtree provides two distinct duration types under the `Durable` interface: `Duration` and `UnitDuration`. Both return `*time.Duration`, but they differ in how the flag value is parsed and what the CLI input looks like.
+
+<Note>
+`Duration()` and `UnitDuration()` both return `*time.Duration`. The difference is in registration and flag parsing: `Duration` expects a duration string on the CLI (e.g. `30s`), while `UnitDuration` expects a plain integer that is multiplied by a unit at registration time (e.g. `5` with `time.Minute` → 5 minutes).
+</Note>
+
+---
+
+## Duration type
+
+Use `Duration` when the configuration flag value is itself a Go duration string such as `30s`, `5m`, `1h30m`, or `500ms`. The standard `time.ParseDuration` format applies.
+
+### NewDuration()
+
+```go
+func (p Plant) NewDuration(name string, value time.Duration, usage string) Plant
+```
+
+Registers a new duration property backed by a `time.Duration` flag value. The CLI flag accepts any string that `time.ParseDuration` can parse.
+
+<ParamField path="name" type="string" required>
+  The flag name. Exposed as `-name=30s` on the command line and as the uppercase env var `NAME`.
+</ParamField>
+
+<ParamField path="value" type="time.Duration" required>
+  Default duration. Expressed as a `time.Duration` literal (e.g. `30 * time.Second`).
+</ParamField>
+
+<ParamField path="usage" type="string" required>
+  Human-readable description displayed by `-h` and `UsageString()`.
+</ParamField>
+
+<ResponseField name="Plant" type="Plant">
+  The same Plant instance, enabling method chaining.
+</ResponseField>
+
+```go
+import (
+    "log"
+    "time"
+    "github.com/andreimerlescu/figtree/v2"
+)
+
+figs := figtree.New()
+figs.NewDuration("timeout", 30*time.Second, "HTTP request timeout (e.g. 30s, 2m)")
+figs.WithValidator("timeout", figtree.AssureDurationMin(1*time.Second))
+figs.WithValidator("timeout", figtree.AssureDurationMax(5*time.Minute))
+if err := figs.Parse(); err != nil {
+    log.Fatal(err)
+}
+timeout := *figs.Duration("timeout")
+// Use: -timeout=45s  or  TIMEOUT=45s
+```
+
+---
+
+### Duration()
+
+```go
+func (p Plant) Duration(name string) *time.Duration
+```
+
+Returns a pointer to the current duration value. Returns `nil` if the property is not registered. When `Options.Pollinate` is `true`, re-reads the environment on every call and calls `StoreDuration()` if the value has changed.
+
+<ParamField path="name" type="string" required>
+  The registered property name (case-insensitive).
+</ParamField>
+
+<ResponseField name="*time.Duration" type="*time.Duration">
+  Pointer to the current `time.Duration`. Returns `nil` for unregistered properties.
+</ResponseField>
+
+```go
+timeout := *figs.Duration("timeout")
+client := &http.Client{Timeout: timeout}
+```
+
+---
+
+### StoreDuration()
+
+```go
+func (p Plant) StoreDuration(name string, value time.Duration) Plant
+```
+
+Replaces the current value of a registered `Duration` property at runtime. Emits a `Mutation` when `Tracking` is enabled.
+
+<ParamField path="name" type="string" required>
+  The registered property name.
+</ParamField>
+
+<ParamField path="value" type="time.Duration" required>
+  The new duration value.
+</ParamField>
+
+<ResponseField name="Plant" type="Plant">
+  The same Plant instance, enabling method chaining.
+</ResponseField>
+
+```go
+figs.StoreDuration("timeout", 10*time.Second)
+```
+
+---
+
+## UnitDuration type
+
+Use `UnitDuration` when the configuration flag is a plain integer and a fixed time unit multiplies it to produce the final duration. For example, if you want a `-minutes=5` flag that means 5 minutes, you register it with `value=5` and `units=time.Minute`.
+
+The stored value is `value * units`, so `NewUnitDuration("minutes", 5, time.Minute, "...")` stores `5 * time.Minute = 5m0s`.
+
+### NewUnitDuration()
+
+```go
+func (p Plant) NewUnitDuration(name string, value, units time.Duration, usage string) Plant
+```
+
+Registers a new unit-duration property. The CLI flag accepts a plain integer (the count), and the `units` parameter specifies the multiplier applied at storage time.
+
+<ParamField path="name" type="string" required>
+  The flag name. Exposed as `-name=5` on the command line.
+</ParamField>
+
+<ParamField path="value" type="time.Duration" required>
+  The default count. Even though the parameter type is `time.Duration`, it represents a raw integer count before multiplication. Pass `time.Duration` integer values like `5` or `30`. In practice, `time.Duration` is an `int64` alias, so `5` and `time.Duration(5)` are equivalent here.
+</ParamField>
+
+<ParamField path="units" type="time.Duration" required>
+  The multiplier unit. Common values: `time.Second`, `time.Minute`, `time.Hour`, `time.Millisecond`. The stored value becomes `value * units`.
+</ParamField>
+
+<ParamField path="usage" type="string" required>
+  Human-readable description.
+</ParamField>
+
+<ResponseField name="Plant" type="Plant">
+  The same Plant instance, enabling method chaining.
+</ResponseField>
+
+**Examples:**
+
+```go
+import (
+    "log"
+    "time"
+    "github.com/andreimerlescu/figtree/v2"
+)
+
+figs := figtree.New()
+
+// -minutes=5 → 5 * time.Minute = 5m0s
+figs.NewUnitDuration("minutes", 1, time.Minute, "polling interval in minutes")
+
+// -seconds=30 → 30 * time.Second = 30s
+figs.NewUnitDuration("seconds", 30, time.Second, "retry delay in seconds")
+
+// -hours=2 → 2 * time.Hour = 2h0m0s
+figs.NewUnitDuration("hours", 8, time.Hour, "session expiry in hours")
+
+figs.WithValidator("minutes", figtree.AssureDurationGreaterThan(30*time.Second))
+
+if err := figs.Parse(); err != nil {
+    log.Fatal(err)
+}
+
+interval := *figs.UnitDuration("minutes")
+fmt.Println("interval:", interval) // e.g. "5m0s"
+```
+
+<Tip>
+When the `-name` flag is passed on the CLI, the value is treated as a raw integer count and stored as `count * units`. So `-minutes=10` stores `10 * time.Minute`, not `10ns`. The multiplication happens during `NewUnitDuration` registration and again in `StoreUnitDuration`.
+</Tip>
+
+---
+
+### UnitDuration()
+
+```go
+func (p Plant) UnitDuration(name string) *time.Duration
+```
+
+Returns a pointer to the current duration value for a `UnitDuration` property. The returned value has already been scaled (it is `count * units`, not the raw count).
+
+<ParamField path="name" type="string" required>
+  The registered property name (case-insensitive).
+</ParamField>
+
+<ResponseField name="*time.Duration" type="*time.Duration">
+  Pointer to the scaled `time.Duration`. Returns `nil` for unregistered properties.
+</ResponseField>
+
+```go
+// If registered as NewUnitDuration("interval", 1, time.Minute, ...)
+// and -interval=5 was passed on the CLI:
+interval := *figs.UnitDuration("interval") // 5m0s
+fmt.Println(interval)                       // "5m0s"
+```
+
+---
+
+### StoreUnitDuration()
+
+```go
+func (p Plant) StoreUnitDuration(name string, value, units time.Duration) Plant
+```
+
+Replaces the current value of a `UnitDuration` property at runtime. Like `NewUnitDuration`, the stored value is `value * units`.
+
+<ParamField path="name" type="string" required>
+  The registered property name.
+</ParamField>
+
+<ParamField path="value" type="time.Duration" required>
+  The new count (integer, as a `time.Duration`).
+</ParamField>
+
+<ParamField path="units" type="time.Duration" required>
+  The multiplier unit applied at storage time.
+</ParamField>
+
+<ResponseField name="Plant" type="Plant">
+  The same Plant instance, enabling method chaining.
+</ResponseField>
+
+```go
+// Set interval to 10 minutes
+figs.StoreUnitDuration("interval", 10, time.Minute)
+fmt.Println(*figs.UnitDuration("interval")) // "10m0s"
+```
+
+---
+
+## Choosing between Duration and UnitDuration
+
+| Scenario | Use |
+|---|---|
+| Flag value is a duration string: `-timeout=30s` | `Duration` |
+| Flag value is a plain integer that means "N seconds": `-delay=30` | `UnitDuration` with `units=time.Second` |
+| Flag value is a plain integer that means "N minutes": `-interval=5` | `UnitDuration` with `units=time.Minute` |
+| Config file contains `"timeout": "2m30s"` | `Duration` |
+| Config file contains `"interval": 5` (minutes) | `UnitDuration` with `units=time.Minute` |
+
+```go
+// Duration: the flag/env value IS the duration string
+figs.NewDuration("ttl", 10*time.Minute, "cache TTL")
+// CLI: -ttl=10m  or  TTL=10m
+
+// UnitDuration: the flag/env value is a plain integer multiplied by the unit
+figs.NewUnitDuration("ttlMinutes", 10, time.Minute, "cache TTL in minutes")
+// CLI: -ttlMinutes=10  or  TTLMINUTES=10
+```

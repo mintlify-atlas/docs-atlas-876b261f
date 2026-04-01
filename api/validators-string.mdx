@@ -1,0 +1,384 @@
+---
+title: "String validators"
+description: "Built-in validators for string and bool configuration properties"
+---
+
+Figtree ships a set of ready-made validator functions for string and bool properties. Pass any of them directly to `WithValidator` — factory functions return a `FigValidatorFunc`, while the non-factory validators match the `func(interface{}) error` signature that `WithValidator` expects directly.
+
+```go
+type FigValidatorFunc func(interface{}) error
+```
+
+---
+
+## String validators
+
+### `AssureStringNotEmpty`
+
+```go
+var AssureStringNotEmpty = func(value interface{}) error
+```
+
+Ensures the string is not empty. Returns an error if the value is an empty string or not a string at all.
+
+**Type:** `func(interface{}) error` (pass directly — not a factory)
+
+```go
+figs.NewString("name", "", "display name").
+    WithValidator("name", figtree.AssureStringNotEmpty)
+```
+
+---
+
+### `AssureStringLength`
+
+```go
+var AssureStringLength = func(length int) FigValidatorFunc
+```
+
+Ensures the string has **at least** `length` characters.
+
+<ParamField path="length" type="int" required>
+  Minimum number of characters the string must contain.
+</ParamField>
+
+```go
+figs.NewString("password", "", "user password").
+    WithValidator("password", figtree.AssureStringLength(8))
+```
+
+---
+
+### `AssureStringNotLength`
+
+```go
+var AssureStringNotLength = func(length int) FigValidatorFunc
+```
+
+Ensures the string does **not** have exactly `length` characters.
+
+<ParamField path="length" type="int" required>
+  The exact length that is forbidden.
+</ParamField>
+
+```go
+figs.NewString("token", "", "api token").
+    WithValidator("token", figtree.AssureStringNotLength(0))
+```
+
+---
+
+### `AssureStringLengthGreaterThan`
+
+```go
+var AssureStringLengthGreaterThan = func(length int) FigValidatorFunc
+```
+
+Ensures the string length is **greater than** `length` characters.
+
+<ParamField path="length" type="int" required>
+  The exclusive lower bound on the string length.
+</ParamField>
+
+```go
+figs.NewString("bio", "", "user biography").
+    WithValidator("bio", figtree.AssureStringLengthGreaterThan(10))
+```
+
+---
+
+### `AssureStringLengthLessThan`
+
+```go
+var AssureStringLengthLessThan = func(length int) FigValidatorFunc
+```
+
+Ensures the string length is **less than** `length` characters.
+
+<ParamField path="length" type="int" required>
+  The exclusive upper bound on the string length.
+</ParamField>
+
+```go
+figs.NewString("slug", "", "url slug").
+    WithValidator("slug", figtree.AssureStringLengthLessThan(64))
+```
+
+---
+
+### `AssureStringSubstring`
+
+```go
+var AssureStringSubstring = func(sub string) FigValidatorFunc
+```
+
+Ensures the string contains `sub` as a substring (case-sensitive).
+
+<ParamField path="sub" type="string" required>
+  The required substring.
+</ParamField>
+
+```go
+figs.NewString("dsn", "", "database connection string").
+    WithValidator("dsn", figtree.AssureStringSubstring("@"))
+```
+
+---
+
+### `AssureStringContains`
+
+```go
+var AssureStringContains = func(substring string) FigValidatorFunc
+```
+
+Ensures the string contains `substring` (case-sensitive). Equivalent to `AssureStringSubstring` but built with the internal `makeStringValidator` helper.
+
+<ParamField path="substring" type="string" required>
+  The required substring.
+</ParamField>
+
+```go
+figs.NewString("email", "", "user email").
+    WithValidator("email", figtree.AssureStringContains("@"))
+```
+
+---
+
+### `AssureStringNotContains`
+
+```go
+var AssureStringNotContains = func(substring string) FigValidatorFunc
+```
+
+Ensures the string does **not** contain `substring` (case-sensitive).
+
+<ParamField path="substring" type="string" required>
+  The forbidden substring.
+</ParamField>
+
+```go
+figs.NewString("username", "", "username").
+    WithValidator("username", figtree.AssureStringNotContains(" "))
+```
+
+---
+
+### `AssureStringHasPrefix`
+
+```go
+var AssureStringHasPrefix = func(prefix string) FigValidatorFunc
+```
+
+Ensures the string begins with `prefix`.
+
+<ParamField path="prefix" type="string" required>
+  The required prefix.
+</ParamField>
+
+```go
+figs.NewString("url", "", "endpoint url").
+    WithValidator("url", figtree.AssureStringHasPrefix("https://"))
+```
+
+---
+
+### `AssureStringHasSuffix`
+
+```go
+var AssureStringHasSuffix = func(suffix string) FigValidatorFunc
+```
+
+Ensures the string ends with `suffix`.
+
+<ParamField path="suffix" type="string" required>
+  The required suffix.
+</ParamField>
+
+```go
+figs.NewString("certfile", "", "TLS certificate path").
+    WithValidator("certfile", figtree.AssureStringHasSuffix(".pem"))
+```
+
+---
+
+### `AssureStringNoPrefix`
+
+```go
+var AssureStringNoPrefix = func(prefix string) FigValidatorFunc
+```
+
+Ensures the string does **not** begin with `prefix`.
+
+<ParamField path="prefix" type="string" required>
+  The forbidden prefix.
+</ParamField>
+
+```go
+figs.NewString("path", "", "relative path").
+    WithValidator("path", figtree.AssureStringNoPrefix("/"))
+```
+
+---
+
+### `AssureStringNoSuffix`
+
+```go
+var AssureStringNoSuffix = func(suffix string) FigValidatorFunc
+```
+
+Ensures the string does **not** end with `suffix`.
+
+<ParamField path="suffix" type="string" required>
+  The forbidden suffix.
+</ParamField>
+
+```go
+figs.NewString("dir", "", "directory path").
+    WithValidator("dir", figtree.AssureStringNoSuffix("/"))
+```
+
+---
+
+### `AssureStringNoPrefixes`
+
+```go
+var AssureStringNoPrefixes = func(prefixes []string) FigValidatorFunc
+```
+
+Ensures the string does not begin with **any** of the given prefixes. Checks each prefix in order and returns on the first match.
+
+<ParamField path="prefixes" type="[]string" required>
+  List of forbidden prefixes.
+</ParamField>
+
+```go
+figs.NewString("scheme", "", "allowed scheme").
+    WithValidator("scheme", figtree.AssureStringNoPrefixes([]string{"ftp://", "http://"}))
+```
+
+---
+
+### `AssureStringNoSuffixes`
+
+```go
+var AssureStringNoSuffixes = func(suffixes []string) FigValidatorFunc
+```
+
+Ensures the string does not end with **any** of the given suffixes.
+
+<ParamField path="suffixes" type="[]string" required>
+  List of forbidden suffixes.
+</ParamField>
+
+```go
+figs.NewString("filename", "", "upload filename").
+    WithValidator("filename", figtree.AssureStringNoSuffixes([]string{".exe", ".sh", ".bat"}))
+```
+
+---
+
+### `AssureStringHasPrefixes`
+
+```go
+var AssureStringHasPrefixes = func(prefixes []string) FigValidatorFunc
+```
+
+Ensures the string begins with **all** of the given prefixes. Because a string can only have one prefix, this is most useful when the slice contains a single prefix or to enforce that multiple independent sub-strings appear at the beginning of a compound value.
+
+<ParamField path="prefixes" type="[]string" required>
+  List of required prefixes — all must match.
+</ParamField>
+
+```go
+figs.NewString("header", "", "request header").
+    WithValidator("header", figtree.AssureStringHasPrefixes([]string{"X-"}))
+```
+
+---
+
+### `AssureStringHasSuffixes`
+
+```go
+var AssureStringHasSuffixes = func(suffixes []string) FigValidatorFunc
+```
+
+Ensures the string ends with **all** of the given suffixes.
+
+<ParamField path="suffixes" type="[]string" required>
+  List of required suffixes — all must match.
+</ParamField>
+
+```go
+figs.NewString("file", "", "configuration file").
+    WithValidator("file", figtree.AssureStringHasSuffixes([]string{".yml"}))
+```
+
+---
+
+## Bool validators
+
+### `AssureBoolTrue`
+
+```go
+var AssureBoolTrue = func(value interface{}) error
+```
+
+Ensures a bool property is `true`. Returns an error if the value is `false` or not a bool.
+
+**Type:** `func(interface{}) error` (pass directly — not a factory)
+
+```go
+figs.NewBool("enabled", false, "feature flag").
+    WithValidator("enabled", figtree.AssureBoolTrue)
+```
+
+---
+
+### `AssureBoolFalse`
+
+```go
+var AssureBoolFalse = func(value interface{}) error
+```
+
+Ensures a bool property is `false`. Returns an error if the value is `true` or not a bool.
+
+**Type:** `func(interface{}) error` (pass directly — not a factory)
+
+```go
+figs.NewBool("readonly", true, "read-only mode").
+    WithValidator("readonly", figtree.AssureBoolFalse)
+```
+
+---
+
+## Using multiple validators
+
+You can call `WithValidator` multiple times on the same property to chain validators. All validators run in registration order, and the first failure stops execution.
+
+```go
+figs.NewString("hostname", "", "server hostname").
+    WithValidator("hostname", figtree.AssureStringNotEmpty).
+    WithValidator("hostname", figtree.AssureStringLengthLessThan(253)).
+    WithValidator("hostname", figtree.AssureStringNotContains(" "))
+```
+
+<Note>
+  Validators run during `Parse()`, `ParseFile()`, `Load()`, and `LoadFile()`. A property with `RuleNoValidations` set skips all validators regardless of how many are registered.
+</Note>
+
+---
+
+<CardGroup cols={2}>
+  <Card title="Numeric validators" icon="calculator" href="/api/validators-numeric">
+    Validators for int, int64, float64, and duration properties.
+  </Card>
+  <Card title="Collection validators" icon="list" href="/api/validators-collections">
+    Validators for list and map properties.
+  </Card>
+  <Card title="Validators guide" icon="shield-check" href="/guides/validators">
+    How to write custom validators and compose built-ins.
+  </Card>
+  <Card title="Rules reference" icon="lock" href="/api/rules-reference">
+    Use `RuleNoValidations` to skip validators on a property.
+  </Card>
+</CardGroup>

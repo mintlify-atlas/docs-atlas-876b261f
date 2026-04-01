@@ -1,0 +1,253 @@
+---
+title: "The Plant Interface"
+description: "Understanding the central Plant interface and how it composes all Figtree capabilities"
+---
+
+The `Plant` interface is the primary type returned by every Figtree constructor. It is the single surface through which you register configuration values, load them from files and environment variables, validate them, and react to changes.
+
+```go
+import figtree "github.com/andreimerlescu/figtree/v2"
+
+var figs figtree.Plant = figtree.New()
+```
+
+## Interface composition
+
+`Plant` is a composed interface that combines three top-level interfaces:
+
+```go
+type Plant interface {
+    Core
+    CoreAbilities
+    CoreMutations
+}
+```
+
+Each of those interfaces is itself composed of smaller, focused interfaces.
+
+### Core
+
+`Core` provides the fundamental inspection and display methods available on every tree.
+
+| Method | Description |
+|--------|-------------|
+| `FigFlesh(name string) Flesh` | Returns the raw `Flesh` value for a named fig |
+| `ErrorFor(name string) error` | Returns any error attached to the named fig |
+| `Usage()` | Prints the help text for all registered flags |
+| `UsageString() string` | Returns the help text as a string |
+
+### CoreAbilities
+
+`CoreAbilities` groups the operational capabilities of the tree.
+
+```go
+type CoreAbilities interface {
+    Withables
+    Savable
+    Readable
+    Parsable
+    Mutable
+    Loadable
+    Divine
+}
+```
+
+#### Withables
+
+`Withables` attaches behavioral configuration to individual figs after they are registered.
+
+| Method | Description |
+|--------|-------------|
+| `WithCallback(name string, when CallbackWhen, fn CallbackFunc) Plant` | Registers a callback to fire at a specific lifecycle event |
+| `WithAlias(name, alias string) Plant` | Registers a short-form name for a fig |
+| `WithRule(name string, rule RuleKind) Plant` | Attaches a rule to a single fig |
+| `WithTreeRule(rule RuleKind) Plant` | Attaches a global rule to the entire tree |
+| `WithValidator(name string, validator func(interface{}) error) Plant` | Binds a validation function to a fig |
+
+#### Savable and Readable
+
+`Savable` and `Readable` handle file-based persistence of the full tree state.
+
+| Method | Description |
+|--------|-------------|
+| `SaveTo(path string) error` | Serializes the tree to a file at the given path |
+| `ReadFrom(path string) error` | Loads a previously saved tree from a file |
+
+#### Parsable
+
+`Parsable` controls how the tree ingests configuration values.
+
+| Method | Description |
+|--------|-------------|
+| `Parse() error` | Parses CLI flags and reads environment variables |
+| `ParseFile(filename string) error` | Parses a JSON, YAML, or INI file |
+
+#### Mutable
+
+`Mutable` exposes the mutation tracking channel and type introspection utilities.
+
+| Method | Description |
+|--------|-------------|
+| `Mutations() <-chan Mutation` | Returns a receive-only channel that emits a `Mutation` whenever a value changes |
+| `MutagenesisOfFig(name string) Mutagenesis` | Looks up a fig by name and returns its type |
+| `MutagenesisOf(what interface{}) Mutagenesis` | Determines the `Mutagenesis` of any value |
+
+#### Loadable
+
+`Loadable` covers file and environment loading at runtime.
+
+| Method | Description |
+|--------|-------------|
+| `Load() error` | Tries `CONFIG_FILE` env var, then default config file paths |
+| `LoadFile(path string) error` | Loads a specific JSON, YAML, or INI file |
+| `Reload() error` | Re-reads environment variables and re-validates all figs |
+
+#### Divine
+
+`Divine` controls the locking state of the tree.
+
+| Method | Description |
+|--------|-------------|
+| `Recall()` | Unlocks the tree, allowing changes and resuming tracking |
+| `Curse()` | Locks the tree, preventing changes and pausing tracking |
+
+### CoreMutations
+
+`CoreMutations` groups all typed getter/setter/register interfaces by value type.
+
+```go
+type CoreMutations interface {
+    Intable
+    Intable64
+    Floatable
+    String
+    Flaggable
+    Durable
+    Listable
+    Mappable
+}
+```
+
+Each sub-interface follows the same three-method pattern: `New<Type>` to register, `<Type>` to read, and `Store<Type>` to update.
+
+| Interface | Methods |
+|-----------|---------|
+| `Intable` | `NewInt`, `Int`, `StoreInt` |
+| `Intable64` | `NewInt64`, `Int64`, `StoreInt64` |
+| `Floatable` | `NewFloat64`, `Float64`, `StoreFloat64` |
+| `String` | `NewString`, `String`, `StoreString` |
+| `Flaggable` | `NewBool`, `Bool`, `StoreBool` |
+| `Durable` | `NewDuration`, `Duration`, `StoreDuration`, `NewUnitDuration`, `UnitDuration`, `StoreUnitDuration` |
+| `Listable` | `NewList`, `List`, `StoreList` |
+| `Mappable` | `NewMap`, `Map`, `MapKeys`, `StoreMap` |
+
+## The Flesh interface
+
+`Flesh` is returned by `Core.FigFlesh(name)` and provides a type-safe way to inspect the raw value stored for any fig without knowing its type in advance.
+
+```go
+type Flesh interface {
+    // Type checks
+    Is(mutagenesis Mutagenesis) bool
+    IsString() bool
+    IsInt() bool
+    IsInt64() bool
+    IsBool() bool
+    IsFloat64() bool
+    IsDuration() bool
+    IsUnitDuration() bool
+    IsList() bool
+    IsMap() bool
+
+    // Raw access
+    AsIs() interface{}
+
+    // Typed conversions
+    ToString() string
+    ToInt() int
+    ToInt64() int64
+    ToBool() bool
+    ToFloat64() float64
+    ToDuration() time.Duration
+    ToUnitDuration() time.Duration
+    ToList() []string
+    ToMap() map[string]string
+}
+```
+
+This is useful when writing generic code that handles multiple fig types, such as a custom logger or serializer.
+
+```go
+import figtree "github.com/andreimerlescu/figtree/v2"
+
+figs := figtree.New()
+figs.NewInt("workers", 10, "number of workers")
+figs.NewString("endpoint", "http://localhost", "API endpoint")
+_ = figs.Parse()
+
+flesh := figs.FigFlesh("workers")
+if flesh.IsInt() {
+    fmt.Println("workers =", flesh.ToInt())
+}
+```
+
+## Method chaining
+
+All `New<Type>`, `Store<Type>`, and `With*` methods return `Plant`, so you can chain registration and configuration calls on a single statement.
+
+```go
+import figtree "github.com/andreimerlescu/figtree/v2"
+
+figs := figtree.New()
+
+figs.NewString("env", "production", "deployment environment").
+    WithValidator("env", figtree.AssureStringNotEmpty).
+    WithRule("env", figtree.RulePreventChange)
+
+figs.NewInt("workers", 4, "number of workers").
+    WithValidator("workers", figtree.AssureIntPositive)
+
+if err := figs.Parse(); err != nil {
+    log.Fatal(err)
+}
+```
+
+## Storing the result
+
+Declare the variable as `figtree.Plant` to keep the full interface accessible throughout your program.
+
+```go
+import figtree "github.com/andreimerlescu/figtree/v2"
+
+var figs figtree.Plant
+
+func main() {
+    figs = figtree.Grow() // Tracking: true
+    figs.NewBool("debug", false, "enable debug logging")
+    if err := figs.Parse(); err != nil {
+        log.Fatal(err)
+    }
+    if *figs.Bool("debug") {
+        log.Println("debug mode enabled")
+    }
+}
+```
+
+<Note>
+The README also uses the type `figtree.Fruit` as a variable name (not a type alias in the public API). Always use `figtree.Plant` as the declared type for variables holding a Figtree instance.
+</Note>
+
+<CardGroup cols={2}>
+  <Card title="Mutagenesis types" href="/concepts/mutagenesis-types">
+    The nine supported value types and how to use them
+  </Card>
+  <Card title="Options" href="/concepts/options">
+    Configuring the tree with Options when using With()
+  </Card>
+  <Card title="Configuration sources" href="/concepts/config-sources">
+    How values are resolved from files, env vars, and flags
+  </Card>
+  <Card title="API: constructors" href="/api/constructors">
+    New(), Grow(), and With() reference
+  </Card>
+</CardGroup>

@@ -1,0 +1,131 @@
+---
+title: "Introduction"
+description: "What Figtree is and how it fits into your Go CLI application"
+---
+
+Figtree is a configuration management library for Go CLI applications. It unifies three configuration sources — command-line flags, environment variables, and config files (YAML, JSON, INI) — into a single, type-safe interface so you never have to wire them up separately or manually reconcile which source wins.
+
+## The problem Figtree solves
+
+Most CLI tools need to handle configuration from multiple sources with a clear precedence: a flag passed at the terminal should override a value in `config.yaml`, which itself overrides a compiled default. Setting this up manually means writing flag definitions, `os.Getenv` calls, file parsing, and merge logic — all before your program does any real work.
+
+Figtree handles all of that. You declare a property once, attach validators and callbacks if you need them, call `Parse()` or `Load()`, and read typed values from that point forward.
+
+```go
+figs := figtree.Grow()
+figs.NewString("endpoint", "http://localhost:8080", "API base URL")
+figs.WithValidator("endpoint", figtree.AssureStringHasPrefix("http"))
+if err := figs.Parse(); err != nil {
+    log.Fatal(err)
+}
+fmt.Println(*figs.String("endpoint"))
+```
+
+## The fig tree metaphor
+
+The library's design mirrors the biology of a real fig tree:
+
+| Metaphor | Figtree concept |
+|---|---|
+| Planting the tree | `New()`, `Grow()`, or `With()` — the constructors |
+| Fruit on the tree | Each registered property is a **fig** (a `*Fig`) |
+| Pollination | The `Pollinate` option — re-checks env vars on every getter call |
+| Genetic mutations | `Mutation` values emitted on the `Mutations()` channel whenever a value changes |
+| Dormancy / renewal | `Curse()` / `Recall()` — pause and resume mutation tracking |
+| Natural selection | `WithValidator()` — only values that pass validation survive |
+
+The result is an API that feels intuitive: you grow a tree, hang fruit (properties) on it, and harvest values at runtime.
+
+## The `Plant` interface
+
+Every constructor returns a `figtree.Plant`. This is the central type in the library — a single interface that composes all capabilities:
+
+```go
+type Plant interface {
+    Core           // Usage, FigFlesh, ErrorFor
+    CoreAbilities  // Parse, Load, WithValidator, WithCallback, WithRule, Mutations, Curse, Recall, ...
+    CoreMutations  // NewString, String, NewInt, Int, NewBool, Bool, NewUnitDuration, UnitDuration, ...
+}
+```
+
+You only ever interact with `Plant`. The concrete `figTree` struct is unexported.
+
+## Three ways to create a Figtree
+
+<CardGroup cols={3}>
+  <Card title="New()" icon="seedling">
+    Creates a tree **without** mutation tracking. Use this when you read configuration once at startup and never need to observe changes at runtime.
+
+    ```go
+    figs := figtree.New()
+    ```
+  </Card>
+  <Card title="Grow()" icon="tree">
+    Creates a tree **with** mutation tracking enabled. The `Mutations()` channel is open and will emit a `Mutation` whenever a property value changes.
+
+    ```go
+    figs := figtree.Grow()
+    ```
+  </Card>
+  <Card title="With(Options{})">
+    Full control. Pass an `Options` struct to configure tracking, config file path, environment isolation, pollination, and more.
+
+    ```go
+    figs := figtree.With(figtree.Options{
+        Tracking:  true,
+        Germinate: true,
+    })
+    ```
+  </Card>
+</CardGroup>
+
+### When to use each
+
+| Constructor | Mutation tracking | Use case |
+|---|---|---|
+| `New()` | No | Simple scripts; read config once, never watch for changes |
+| `Grow()` | Yes | Long-running services that react to env var changes at runtime |
+| `With(Options{})` | Configurable | Any case where you need fine-grained control over Options |
+
+### `Options` reference
+
+| Field | Type | Effect |
+|---|---|---|
+| `Tracking` | `bool` | Enables the `Mutations()` channel |
+| `Germinate` | `bool` | Filters out `-test.*` flags injected by `go test` |
+| `Pollinate` | `bool` | Re-reads `os.Getenv(key)` on every getter call to detect live env changes |
+| `Harvest` | `int` | Buffer size of the mutations channel |
+| `IgnoreEnvironment` | `bool` | Calls `os.Clearenv()` and ignores all env vars |
+| `ConfigFile` | `string` | Path to a YAML, JSON, or INI config file loaded by `Load()` |
+
+## Module information
+
+| | |
+|---|---|
+| Module path | `github.com/andreimerlescu/figtree/v2` |
+| Current version | v2.0.14 |
+| Minimum Go version | 1.23.4 |
+| License | MIT |
+
+Install with:
+
+```bash
+go get -u github.com/andreimerlescu/figtree/v2
+```
+
+---
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="bolt" href="/quickstart">
+    Install Figtree and build your first configured CLI app in five minutes.
+  </Card>
+  <Card title="Core Concepts — Plant Interface" icon="book" href="/concepts/plant-interface">
+    A deep dive into the `Plant` interface and how all capabilities compose together.
+  </Card>
+  <Card title="Options" icon="sliders" href="/concepts/options">
+    Every field on `Options{}` explained with examples.
+  </Card>
+  <Card title="Config Sources" icon="layer-group" href="/concepts/config-sources">
+    How flags, environment variables, and files are merged and which source wins.
+  </Card>
+</CardGroup>

@@ -1,0 +1,247 @@
+---
+title: "Constructors"
+description: "Creating a Figtree instance with New(), Grow(), or With()"
+---
+
+The `figtree` package exposes three constructor functions that return a [`Plant`](/concepts/plant-interface). All three ultimately delegate to `With()`. Choose the one that matches how much control you need at initialization time.
+
+---
+
+## New()
+
+```go
+func New() Plant
+```
+
+Returns a `Plant` with `Tracking: false`. No mutations channel is active. Use this when your configuration is effectively read-only after `Parse()` or `Load()` and you have no need to react to changes at runtime.
+
+```go
+import "github.com/andreimerlescu/figtree/v2"
+
+figs := figtree.New()
+figs.NewInt("workers", 10, "number of workers")
+figs.NewString("endpoint", "http://localhost", "API endpoint")
+if err := figs.Parse(); err != nil {
+    log.Fatal(err)
+}
+workers := *figs.Int("workers")
+fmt.Println("workers:", workers)
+```
+
+---
+
+## Grow()
+
+```go
+func Grow() Plant
+```
+
+Returns a `Plant` with `Tracking: true`. This enables the `Mutations()` channel so you can react to configuration changes at runtime. Use this when your application needs to respond to value updates—for example, adjusting worker pools or connection timeouts without restarting.
+
+```go
+import (
+    "context"
+    "log"
+    "github.com/andreimerlescu/figtree/v2"
+)
+
+ctx, cancel := context.WithCancel(context.Background())
+defer cancel()
+
+figs := figtree.Grow()
+figs.NewInt("workers", 10, "number of workers")
+if err := figs.Load(); err != nil {
+    log.Fatal(err)
+}
+
+go func() {
+    for {
+        select {
+        case <-ctx.Done():
+            return
+        case mutation, ok := <-figs.Mutations():
+            if !ok {
+                return
+            }
+            log.Printf("%s changed: %v → %v", mutation.Property, mutation.Old, mutation.New)
+        }
+    }
+}()
+```
+
+---
+
+## With()
+
+```go
+func With(opts Options) Plant
+```
+
+Full control over initialization behavior via the `Options` struct. `New()` and `Grow()` are convenience wrappers around `With()`.
+
+<ParamField path="opts" type="Options" required>
+  Configuration options for the Plant. See the Options fields below.
+</ParamField>
+
+### Options fields
+
+<ParamField path="ConfigFile" type="string">
+  Path to a configuration file (JSON, YAML, or INI). When set, `Load()` and `LoadFile()` will read from this path rather than the package-level `ConfigFilePath` default (`./config.yml`). Equivalent to setting `figtree.ConfigFilePath` before construction.
+</ParamField>
+
+<ParamField path="Tracking" type="bool">
+  Enables the `Mutations()` receiver channel. When `true`, every call to a `StoreXxx()` method (or any value change detected via `Pollinate`) emits a `Mutation` value on the channel. Defaults to `false`.
+</ParamField>
+
+<ParamField path="Germinate" type="bool">
+  When `true`, filters any `os.Args` entries that start with `-test.` before flag parsing. Useful when running figtree inside `go test` to prevent the test runner's own flags from causing parse errors. Defaults to `false`.
+</ParamField>
+
+<ParamField path="Harvest" type="int">
+  Buffer size of the mutations channel. `0` (the default) creates an unbuffered channel, meaning a `Store` call will block until the mutation is consumed. Set to a positive integer to allow producers to continue without a listener immediately ready.
+</ParamField>
+
+<ParamField path="Pollinate" type="bool">
+  When `true`, each getter call (e.g. `String()`, `Int()`) checks the current process environment for an updated value and calls `Store()` if the environment differs from the in-memory value. This makes getters slightly more expensive but keeps configuration in sync with live environment variable changes. Defaults to `false`.
+</ParamField>
+
+<ParamField path="IgnoreEnvironment" type="bool">
+  When `true`, calls `os.Clearenv()` during construction, removing all environment variables from the process. All subsequent `os.Getenv()` lookups inside figtree return empty strings. Use with care—this affects the entire process, not just figtree. Defaults to `false`.
+</ParamField>
+
+```go
+import (
+    "log"
+    "github.com/andreimerlescu/figtree/v2"
+)
+
+figs := figtree.With(figtree.Options{
+    ConfigFile:        "/opt/app/production.config.yaml",
+    Tracking:          true,
+    Germinate:         true,
+    Harvest:           256,
+    Pollinate:         true,
+    IgnoreEnvironment: false,
+})
+
+figs.NewString("domain", "", "primary domain name")
+figs.WithValidator("domain", figtree.AssureStringNotEmpty)
+
+if err := figs.Load(); err != nil {
+    log.Fatal(err)
+}
+
+go func() {
+    for mutation := range figs.Mutations() {
+        log.Printf("mutation: %s %v → %v", mutation.Property, mutation.Old, mutation.New)
+    }
+}()
+```
+
+---
+
+## Version()
+
+```go
+func Version() string
+```
+
+Returns the version string embedded in the `VERSION` file at build time. The current release is `v2.0.14`.
+
+```go
+fmt.Println(figtree.Version()) // e.g. "v2.0.14"
+```
+
+---
+
+## Package-level variables
+
+These variables control default behavior across all `Plant` instances. Set them before calling any constructor.
+
+| Variable | Default | Description |
+|---|---|---|
+| `figtree.ConfigFilePath` | `"./config.yml"` | Default path used by `Load()` when no `Options.ConfigFile` is set. |
+| `figtree.EnvironmentKey` | `"CONFIG_FILE"` | Environment variable name that overrides the config file path. |
+| `figtree.ListSeparator` | `","` | Delimiter used when parsing list values from CLI flags or env vars. |
+| `figtree.MapSeparator` | `","` | Delimiter used to split key-value pairs in map values. |
+| `figtree.MapKeySeparator` | `"="` | Delimiter used to separate the key from the value within each map entry. |
+
+```go
+// Override defaults before constructing a Plant
+figtree.ConfigFilePath  = "/etc/myapp/config.yaml"
+figtree.ListSeparator   = "|"
+figtree.MapSeparator    = ";"
+figtree.MapKeySeparator = ":"
+
+figs := figtree.New()
+```
+
+<Note>
+`ListSeparator`, `MapSeparator`, and `MapKeySeparator` are package-level variables, not per-instance options. Changing them affects all active `Plant` instances in the same process.
+</Note>
+
+---
+
+## WithValidators()
+
+```go
+func (p Plant) WithValidators(name string, validators ...func(interface{}) error) Plant
+```
+
+A convenience method for attaching multiple validators to a single property in one call. Internally it calls `WithValidator` for each entry in order.
+
+```go
+figs.WithValidators("name",
+    figtree.AssureStringNotEmpty,
+    figtree.AssureStringLengthGreaterThan(2),
+    figtree.AssureStringNotContains("admin"),
+)
+```
+
+---
+
+## ParseCustomDuration()
+
+```go
+func ParseCustomDuration(input string) (time.Duration, error)
+```
+
+A package-level utility that parses a compact duration string using single-letter unit suffixes. This is used internally by `UnitDuration` flag parsing and is available for direct use.
+
+| Unit | Meaning |
+|------|---------|
+| `y` | Year (365 × 24h) |
+| `l` | Month (30 × 24h) |
+| `w` | Week (7 × 24h) |
+| `d` | Day (24h) |
+| `h` | Hour |
+| `m` | Minute |
+| `s` | Second |
+
+```go
+d, err := figtree.ParseCustomDuration("2h30m")
+// d == 2*time.Hour + 30*time.Minute
+```
+
+Multiple units can be combined: `"1d12h"` → 36 hours.
+
+---
+
+## PolicyMapAppend
+
+```go
+var PolicyMapAppend = false
+```
+
+A package-level boolean that controls how map flag values are merged when a CLI flag is provided alongside a config file value.
+
+- `false` (default) — the CLI flag value **replaces** any file-loaded or default map entries.
+- `true` — the CLI flag value is **merged** into the existing map, appending new keys and overwriting existing ones.
+
+```go
+figtree.PolicyMapAppend = true  // set before constructing
+
+figs := figtree.New()
+figs.NewMap("tags", map[string]string{"env": "prod"}, "deployment tags")
+// With -tags="region=us-east-1", the result is map[env:prod region:us-east-1]
+```

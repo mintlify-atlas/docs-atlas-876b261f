@@ -1,0 +1,229 @@
+---
+title: "Rules"
+description: "Controlling property behavior with per-property and tree-level rules"
+---
+
+Rules let you change how figtree behaves for individual properties or for the entire tree. They are applied after property registration and take effect immediately.
+
+## Two scopes
+
+| Method | Scope | Effect |
+|--------|-------|--------|
+| `WithRule(name, rule)` | Single property | Applies the rule only to the named property |
+| `WithTreeRule(rule)` | Entire tree | Applies the rule to every property on the tree |
+
+```go
+import figtree "github.com/andreimerlescu/figtree/v2"
+
+figs := figtree.Grow()
+figs.NewString("name", "", "Your name")
+
+// Per-property rule
+figs.WithRule("name", figtree.RuleNoValidations)
+
+// Tree-wide rule
+figs.WithTreeRule(figtree.RuleNoFlags)
+```
+
+Both methods return `Plant`, so you can chain them:
+
+```go
+figs.NewInt("port", 8080, "Port number").
+    WithRule("port", figtree.RulePreventChange)
+```
+
+## All 10 `RuleKind` constants
+
+### `RuleUndefined`
+
+The zero value. Assigned automatically; has no effect. You will never need to set this explicitly.
+
+```go
+// iota = 0, applied by default to all properties
+```
+
+---
+
+### `RulePreventChange`
+
+Blocks all `Store*` method calls for a property. Attempts to change the value are silently ignored.
+
+```go
+figs := figtree.Grow()
+figs.NewString("app_name", "MyApp", "Application name")
+figs.WithRule("app_name", figtree.RulePreventChange)
+
+figs.StoreString("app_name", "OtherApp") // no-op
+log.Println(*figs.String("app_name"))    // still "MyApp"
+```
+
+Use this for properties that must remain constant after `Parse()`.
+
+---
+
+### `RulePanicOnChange`
+
+Causes a `panic` on any `Store*` call for the property. Use carefully — this is appropriate for invariants where a change would indicate a programming error.
+
+```go
+figs.NewString("database_driver", "postgres", "Database driver")
+figs.WithRule("database_driver", figtree.RulePanicOnChange)
+
+// figs.StoreString("database_driver", "mysql") // panics
+```
+
+<Warning>
+  `RulePanicOnChange` will crash your program if triggered. Only use it for properties that must never change at runtime under any circumstances.
+</Warning>
+
+---
+
+### `RuleNoValidations`
+
+Skips all validators registered with `WithValidator` for the property. The property still participates in the verify phase, but its validators are not executed.
+
+```go
+figs := figtree.Grow()
+figs.NewString("name", "", "Your name")
+figs.WithValidator("name", figtree.AssureStringNotEmpty)
+figs.WithRule("name", figtree.RuleNoValidations)
+
+err := figs.Parse() // no validation error even with an empty name
+```
+
+This is useful during testing or when you want to register validators for documentation/IDE tooling purposes but disable them in certain environments.
+
+---
+
+### `RuleNoCallbacks`
+
+Skips all callbacks registered with `WithCallback` for the property. The callbacks remain registered but are never invoked.
+
+```go
+figs.WithCallback("endpoint", figtree.CallbackAfterRead, myLoggingCallback)
+figs.WithRule("endpoint", figtree.RuleNoCallbacks)
+
+*figs.String("endpoint") // myLoggingCallback is NOT called
+```
+
+---
+
+### `RuleCondemnedFromResurrection`
+
+Causes a `panic` if figtree attempts to resurrect the property (i.e., create it implicitly when accessed without being explicitly registered via `New*`).
+
+```go
+figs.WithRule("legacy_key", figtree.RuleCondemnedFromResurrection)
+// *figs.String("legacy_key") would panic if "legacy_key" was not registered
+```
+
+---
+
+### `RuleNoMaps` _(tree-wide only)_
+
+Blocks `NewMap`, `StoreMap`, and `Map` from being called anywhere on the tree. Useful for applications that should never use map-type configuration.
+
+```go
+figs := figtree.Grow()
+figs.WithTreeRule(figtree.RuleNoMaps)
+
+figs.NewMap("metadata", map[string]string{}, "Metadata") // silently no-ops
+```
+
+---
+
+### `RuleNoLists` _(tree-wide only)_
+
+Blocks `NewList`, `StoreList`, and `List` from being called on the tree.
+
+```go
+figs := figtree.Grow()
+figs.WithTreeRule(figtree.RuleNoLists)
+
+figs.NewList("servers", []string{}, "Server list") // silently no-ops
+```
+
+---
+
+### `RuleNoFlags`
+
+Disables the `flag` package integration for the tree. Properties registered after this rule is set will not be registered as CLI flags and `-property value` syntax will have no effect.
+
+This is useful when your application reads configuration exclusively from env vars or config files and you want to prevent unintentional flag parsing:
+
+```go
+figs := figtree.Grow()
+figs.WithTreeRule(figtree.RuleNoFlags)
+figs.NewString("name", "", "your name")
+
+err := figs.Load() // reads from config file and env vars only
+```
+
+---
+
+### `RuleNoEnv`
+
+Skips all `os.Getenv` lookups for a property (or the entire tree when applied via `WithTreeRule`). The property's value will only come from its default, CLI flags, or config files.
+
+```go
+// Per-property: ignore env for just "secret_key"
+figs.WithRule("secret_key", figtree.RuleNoEnv)
+
+// Tree-wide: never read environment variables
+figs.WithTreeRule(figtree.RuleNoEnv)
+```
+
+---
+
+## Combining per-property and tree-level rules
+
+Rules from both scopes apply simultaneously. A property blocked by a tree rule cannot override it with a per-property rule.
+
+```go
+figs := figtree.Grow()
+figs.WithTreeRule(figtree.RuleNoFlags)
+
+figs.NewString("name", "", "Your name")
+figs.WithValidator("name", figtree.AssureStringNotEmpty)
+figs.WithRule("name", figtree.RuleNoValidations) // disable validators for "name" only
+
+err := figs.Parse() // no flag parsing (tree rule), no validation (property rule)
+if err != nil {
+    log.Println(err)
+}
+
+figs.StoreString("name", "Yeshua")
+log.Printf("Hello %s", *figs.String("name"))
+```
+
+## Rule reference table
+
+| Constant | Value | Per-property | Tree-wide | Effect |
+|----------|-------|:---:|:---:|--------|
+| `RuleUndefined` | 0 | — | — | No effect (default) |
+| `RulePreventChange` | 1 | Yes | Yes | Silently blocks `Store*` calls |
+| `RulePanicOnChange` | 2 | Yes | Yes | Panics on `Store*` calls |
+| `RuleNoValidations` | 3 | Yes | Yes | Skips all validators |
+| `RuleNoCallbacks` | 4 | Yes | Yes | Skips all callbacks |
+| `RuleCondemnedFromResurrection` | 5 | Yes | Yes | Panics on resurrection |
+| `RuleNoMaps` | 6 | — | Yes | Blocks `NewMap`/`StoreMap`/`Map` |
+| `RuleNoLists` | 7 | — | Yes | Blocks `NewList`/`StoreList`/`List` |
+| `RuleNoFlags` | 8 | — | Yes | Disables `flag` package integration |
+| `RuleNoEnv` | 9 | Yes | Yes | Skips `os.Getenv` lookups |
+
+---
+
+<CardGroup cols={2}>
+  <Card title="Validators" href="/guides/validators">
+    Enforce constraints on values — disable with RuleNoValidations
+  </Card>
+  <Card title="Callbacks" href="/guides/callbacks">
+    React to lifecycle events — disable with RuleNoCallbacks
+  </Card>
+  <Card title="API: Rules reference" href="/api/rules-reference">
+    Full API reference for RuleKind constants and methods
+  </Card>
+  <Card title="Concepts: Plant interface" href="/concepts/plant-interface">
+    Overview of the Plant interface that WithRule and WithTreeRule belong to
+  </Card>
+</CardGroup>

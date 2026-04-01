@@ -1,0 +1,314 @@
+---
+title: "Configuration sources"
+description: "How Figtree resolves values from config files, environment variables, and CLI flags"
+---
+
+Figtree can read configuration values from three sources: **config files**, **environment variables**, and **CLI flags**. Understanding how they interact — and in what order they win — determines what value your code actually receives.
+
+## The three sources
+
+| Source | How values are supplied | Typical use |
+|--------|------------------------|-------------|
+| Config file | YAML, JSON, or INI file on disk | Defaults and deployment configuration |
+| Environment variables | `KEY=value` in the process environment | Container and CI/CD overrides |
+| CLI flags | `-key=value` or `-key value` on `os.Args` | Per-invocation overrides |
+
+## Precedence
+
+When `Load()` is used, the resolution order from lowest to highest priority is:
+
+1. Default values set by `New<Type>(...)`
+2. Config file values (first matching file in the search path)
+3. CLI flag values
+4. Environment variable values (applied last, highest priority)
+
+Environment variables always win. A value set via `WORKERS=20` in the environment overrides both the config file entry `workers: 15` and the CLI flag `-workers=10`.
+
+<Note>
+When using `ParseFile()`, CLI flags are parsed first, then the specified file is loaded on top of them. Environment variables are not automatically applied by `ParseFile()` — call `Reload()` afterwards if you need env var values to take effect.
+</Note>
+
+---
+
+## Methods
+
+### Parse()
+
+`Parse()` is the simplest loading method. It parses CLI flags from `os.Args`, then calls `readEnv()` to overlay environment variable values on top.
+
+```go
+figs := figtree.New()
+figs.NewInt("workers", 10, "number of worker goroutines")
+figs.NewString("endpoint", "http://localhost:8080", "API endpoint")
+
+if err := figs.Parse(); err != nil {
+    log.Fatal(err)
+}
+
+fmt.Println(*figs.Int("workers"))
+fmt.Println(*figs.String("endpoint"))
+```
+
+Run with: `WORKERS=20 go run . -endpoint=https://api.example.com`  
+Result: `workers=20`, `endpoint=https://api.example.com`
+
+---
+
+### Load()
+
+`Load()` is the most flexible loading method. It:
+
+1. Parses CLI flags
+2. Searches for a config file in this order:
+   - The value of the `CONFIG_FILE` environment variable
+   - `Options.ConfigFile` (set via `With()`)
+   - The package-level `figtree.ConfigFilePath` (default `./config.yml`)
+   - `./config.json`
+   - `./config.ini`
+3. Reads environment variables (always applied last)
+
+```go
+figs := figtree.Grow()
+figs.NewInt("workers", 10, "number of workers")
+
+if err := figs.Load(); err != nil {
+    log.Fatal(err)
+}
+```
+
+Figtree tries every path in the list and loads the first file it finds. Files that do not exist are silently skipped; only an error reading an existing file returns an error.
+
+#### Specifying the config file at runtime
+
+Set the `CONFIG_FILE` environment variable to point `Load()` at a specific file without touching your code:
+
+```bash
+CONFIG_FILE=/etc/myapp/production.yaml go run .
+```
+
+You can also change the name of the key Figtree looks for:
+
+```go
+figtree.EnvironmentKey = "MYAPP_CONFIG"
+// Now Load() reads $MYAPP_CONFIG for the file path
+```
+
+---
+
+### LoadFile(path)
+
+`LoadFile()` loads a specific file. If the file exists, its values are applied, env vars are read afterwards, and all validators are run. If the file does not exist, `LoadFile()` still processes CLI flags and env vars and returns an error for the missing file.
+
+```go
+if err := figs.LoadFile("/opt/app/config.yaml"); err != nil {
+    log.Printf("warning: %v", err)
+}
+```
+
+---
+
+### ParseFile(filename)
+
+`ParseFile()` is the `Parsable` counterpart to `LoadFile()`. It parses CLI flags first, then loads the given file. Unlike `Load()`, it does not search fallback paths and does not automatically apply environment variables after the file load.
+
+```go
+if err := figs.ParseFile(filepath.Join(".", "config.yaml")); err != nil {
+    log.Fatal(err)
+}
+```
+
+Use `ParseFile()` when you want explicit control over which file is loaded and do not need automatic env var overlay.
+
+---
+
+### Reload()
+
+`Reload()` re-reads all environment variables against the currently registered figs and re-runs validators. It does not re-parse CLI flags or re-read any config file.
+
+```go
+// Re-check env vars without restarting the process
+if err := figs.Reload(); err != nil {
+    log.Printf("reload error: %v", err)
+}
+```
+
+This is useful in long-running services where you want to pick up environment changes (e.g. secrets rotated in a container) without restarting.
+
+---
+
+### SaveTo(path) and ReadFrom(path)
+
+`SaveTo()` serializes the full current tree state to a file. `ReadFrom()` loads a previously saved tree back into the same tree instance.
+
+```go
+// Save current state
+if err := figs.SaveTo("/tmp/figs-snapshot.json"); err != nil {
+    log.Fatal(err)
+}
+
+// Restore it later
+if err := figs.ReadFrom("/tmp/figs-snapshot.json"); err != nil {
+    log.Fatal(err)
+}
+```
+
+---
+
+## File format auto-detection
+
+Figtree detects the file format from the file extension:
+
+| Extension | Format |
+|-----------|--------|
+| `.yml`, `.yaml` | YAML |
+| `.json` | JSON |
+| `.ini` | INI |
+
+All three formats are supported by `Load()`, `LoadFile()`, and `ParseFile()`.
+
+<Tabs>
+  <Tab title="YAML">
+    ```yaml
+    workers: 15
+    endpoint: "https://api.example.com"
+    debug: true
+    timeout: 45s
+    interval: 2
+    servers: "server1,server2"
+    metadata: "env=prod,version=2.0"
+    ```
+  </Tab>
+  <Tab title="JSON">
+    ```json
+    {
+      "workers": 15,
+      "endpoint": "https://api.example.com",
+      "debug": true,
+      "timeout": "45s",
+      "interval": 2,
+      "servers": "server1,server2",
+      "metadata": "env=prod,version=2.0"
+    }
+    ```
+  </Tab>
+  <Tab title="INI">
+    ```ini
+    workers=15
+    endpoint=https://api.example.com
+    debug=true
+    timeout=45s
+    interval=2
+    servers=server1,server2
+    metadata=env=prod,version=2.0
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## Environment variable naming
+
+Environment variable names are the uppercase form of the registered fig name. Figtree performs a case-insensitive match when reading `os.Getenv`.
+
+| Fig name | Environment variable |
+|----------|---------------------|
+| `workers` | `WORKERS` |
+| `maxRetries` | `MAXRETRIES` |
+| `endpoint` | `ENDPOINT` |
+| `debug` | `DEBUG` |
+
+---
+
+## Unregistered key behavior
+
+If you call a getter for a name that was never registered with `New<Type>()`, Figtree returns `nil` — it does not panic and does not create a new entry.
+
+```go
+// "undefined" was never registered with NewString(...)
+s := figs.String("undefined")
+// s is nil — always check before dereferencing
+if s != nil {
+    log.Println(*s)
+}
+```
+
+<Warning>
+Always register properties with `New<Type>()` before calling `Parse()` or `Load()`. Unregistered keys return `nil` from all getters — dereferencing a nil pointer will panic.
+</Warning>
+
+---
+
+## Choosing a loading strategy
+
+| Scenario | Recommended approach |
+|----------|---------------------|
+| CLI tool, no config file | `Parse()` |
+| Service with a known config file path | `With(Options{ConfigFile: path})` + `Load()` |
+| Config file path set at runtime via env | `Load()` with `CONFIG_FILE` env var |
+| Multiple possible file formats | `Load()` (searches `.yml`, `.json`, `.ini`) |
+| Need to explicitly load one specific file | `LoadFile(path)` or `ParseFile(path)` |
+| Long-running service, env vars may change | `Parse()` or `Load()` at startup, then `Reload()` periodically |
+| Containerized with `Pollinate: true` | `With(Options{Pollinate: true})` + `Parse()` |
+
+---
+
+## Complete example
+
+```go
+package main
+
+import (
+    "log"
+    "os"
+    "path/filepath"
+
+    figtree "github.com/andreimerlescu/figtree/v2"
+)
+
+func main() {
+    // Override the default config file path globally
+    figtree.ConfigFilePath = filepath.Join("/", "opt", "app", "default.config.yaml")
+
+    figs := figtree.With(figtree.Options{
+        Tracking:  true,
+        Germinate: true,
+    })
+
+    figs.NewInt("workers", 10, "number of workers")
+    figs.NewString("endpoint", "http://localhost:8080", "API endpoint")
+    figs.NewBool("debug", false, "enable debug mode")
+
+    // Load tries: $CONFIG_FILE, /opt/app/default.config.yaml, ./config.json, ./config.ini
+    if err := figs.Load(); err != nil {
+        log.Fatal(err)
+    }
+
+    log.Printf("workers=%d endpoint=%s debug=%v",
+        *figs.Int("workers"),
+        *figs.String("endpoint"),
+        *figs.Bool("debug"),
+    )
+
+    // Pick up any environment variable changes without restarting
+    if _, ok := os.LookupEnv("RELOAD"); ok {
+        if err := figs.Reload(); err != nil {
+            log.Println("reload failed:", err)
+        }
+    }
+}
+```
+
+<CardGroup cols={2}>
+  <Card title="Options" href="/concepts/options">
+    All Options fields and their defaults
+  </Card>
+  <Card title="Mutagenesis types" href="/concepts/mutagenesis-types">
+    How each type is parsed from files and env vars
+  </Card>
+  <Card title="Validators guide" href="/guides/validators">
+    Ensuring values meet constraints after loading
+  </Card>
+  <Card title="Mutation tracking guide" href="/guides/mutation-tracking">
+    Reacting to value changes at runtime
+  </Card>
+</CardGroup>

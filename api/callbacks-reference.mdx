@@ -1,0 +1,209 @@
+---
+title: "Callbacks reference"
+description: "Complete reference for callback types, when-hooks, and the WithCallback method"
+---
+
+Callbacks let you run arbitrary Go code in response to lifecycle events on a property — before or after a read, before or after a value change, and before or after the tree is verified. Each callback receives the current value of the property as an `interface{}`.
+
+---
+
+## Types
+
+### `CallbackWhen`
+
+```go
+type CallbackWhen string
+```
+
+`CallbackWhen` is a string type alias that identifies the lifecycle hook at which a callback fires. Pass one of the constants listed below to `WithCallback`.
+
+---
+
+### `CallbackFunc`
+
+```go
+type CallbackFunc func(interface{}) error
+```
+
+`CallbackFunc` is the signature every callback must implement. The `interface{}` argument is the current value of the property at the time the hook fires. Return a non-nil error to signal that the callback failed; the error is joined onto the property's internal error state.
+
+---
+
+### `Callback`
+
+```go
+type Callback struct {
+    CallbackWhen CallbackWhen
+    CallbackFunc CallbackFunc
+}
+```
+
+`Callback` pairs a when-hook with its function. Figtree creates and stores this struct internally when you call `WithCallback` — you do not need to construct it directly.
+
+<ResponseField name="CallbackWhen" type="CallbackWhen">
+  The lifecycle hook at which this callback fires.
+</ResponseField>
+
+<ResponseField name="CallbackFunc" type="CallbackFunc">
+  The function that runs when the hook fires.
+</ResponseField>
+
+---
+
+## CallbackWhen constants
+
+| Constant | Value (string) | Trigger |
+|----------|----------------|---------|
+| `CallbackBeforeRead` | `"CallbackBeforeRead"` | Fires before any getter (`String`, `Int`, `Bool`, etc.) returns the value. |
+| `CallbackAfterRead` | `"CallbackAfterRead"` | Fires after any getter returns the value. |
+| `CallbackBeforeChange` | `"CallbackBeforeChange"` | Fires before a `Store*` method writes the new value. |
+| `CallbackAfterChange` | `"CallbackAfterChange"` | Fires after a `Store*` method has written the new value. |
+| `CallbackBeforeVerify` | `"CallbackBeforeVerify"` | Fires before `Parse` / `Load` runs its validation phase. |
+| `CallbackAfterVerify` | `"CallbackAfterVerify"` | Fires after `Parse` / `Load` completes its validation phase. |
+
+---
+
+## `WithCallback`
+
+```go
+func (tree *figTree) WithCallback(name string, whenCallback CallbackWhen, runThis CallbackFunc) Plant
+```
+
+Registers a callback on a named property. Multiple callbacks may be registered on the same property with the same or different when-hooks; they are appended in registration order and run in that order.
+
+`WithCallback` is a no-op if the property does not exist or if the property has the `RuleNoCallbacks` rule attached.
+
+<ParamField path="name" type="string" required>
+  The name of the property (case-insensitive).
+</ParamField>
+
+<ParamField path="whenCallback" type="CallbackWhen" required>
+  The lifecycle hook constant that determines when the callback runs.
+</ParamField>
+
+<ParamField path="runThis" type="CallbackFunc" required>
+  The function to execute. Must match `func(interface{}) error`.
+</ParamField>
+
+**Returns:** `Plant` — the same tree, for method chaining.
+
+---
+
+## Type-asserting the value
+
+The `interface{}` argument passed to your `CallbackFunc` holds the raw value stored for the property. Use a type switch to cast it safely:
+
+```go
+figtree.CallbackAfterVerify, func(value interface{}) error {
+    var sv string
+    switch v := value.(type) {
+    case *string:
+        sv = *v
+    case string:
+        sv = v
+    default:
+        return fmt.Errorf("unexpected type: want string, got %T", v)
+    }
+    // use sv
+    log.Printf("domain verified: %s", sv)
+    return nil
+}
+```
+
+The same pattern applies to other types:
+
+```go
+// int property
+func(value interface{}) error {
+    switch v := value.(type) {
+    case *int:
+        n := *v
+        _ = n
+    case int:
+        _ = v
+    }
+    return nil
+}
+
+// []string list property
+func(value interface{}) error {
+    switch v := value.(type) {
+    case *[]string:
+        items := *v
+        _ = items
+    case []string:
+        _ = v
+    }
+    return nil
+}
+```
+
+---
+
+## Full example
+
+```go
+figs := figtree.With(figtree.Options{Pollinate: true, Tracking: true, Harvest: 10})
+
+figs.NewString("domain", "", "domain name").
+    WithCallback("domain", figtree.CallbackAfterVerify, func(value interface{}) error {
+        var sv string
+        switch v := value.(type) {
+        case *string:
+            sv = *v
+        case string:
+            sv = v
+        default:
+            return fmt.Errorf("invalid type: want string, got %T", v)
+        }
+        if !strings.HasSuffix(sv, ".example.com") {
+            return fmt.Errorf("domain %q is not within example.com", sv)
+        }
+        return nil
+    })
+
+if err := figs.Load(); err != nil {
+    log.Fatal(err)
+}
+```
+
+---
+
+## Performance notes
+
+<Warning>
+  `CallbackBeforeRead` and `CallbackAfterRead` fire on **every** getter call for the property. Avoid registering expensive operations — I/O, network calls, heavy computation — on read hooks in hot code paths.
+</Warning>
+
+<Tip>
+  `CallbackAfterVerify` is the most common hook. It runs once during `Parse` or `Load` and is the appropriate place to perform secondary validation, cross-property consistency checks, or external lookups.
+</Tip>
+
+---
+
+## Rule interaction
+
+A property with `RuleNoCallbacks` will never run its callbacks, regardless of the hook:
+
+```go
+figs.NewString("internal-key", "", "internal use only").
+    WithRule("internal-key", figtree.RuleNoCallbacks).
+    WithCallback("internal-key", figtree.CallbackAfterChange, someFunc) // never runs
+```
+
+---
+
+<CardGroup cols={2}>
+  <Card title="Rules reference" icon="lock" href="/api/rules-reference">
+    Use `RuleNoCallbacks` to suppress callbacks on a property.
+  </Card>
+  <Card title="Mutations reference" icon="arrows-rotate" href="/api/mutations-reference">
+    Track value changes with the mutations channel.
+  </Card>
+  <Card title="Callbacks guide" icon="bell" href="/guides/callbacks">
+    Practical patterns for lifecycle hooks.
+  </Card>
+  <Card title="Plant interface" icon="leaf" href="/concepts/plant-interface">
+    Full interface reference including `WithCallback`.
+  </Card>
+</CardGroup>
